@@ -31,3 +31,29 @@ val flip : ('a -> 'b -> 'c) -> ('b -> 'a -> 'c)
 val negate : ('a -> bool) -> ('a -> bool)
 (** [negate p] is the negation of the predicate function [p]. For any
     argument [x], [(negate p) x] is [not (p x)]. *)
+
+val protect : acquire:(unit -> 'a) -> finally:('a -> unit) -> ('a -> 'b) -> 'b
+(** [protect ~acquire ~finally work] invokes [acquires], then [work],
+   and then invokes [finally] when [work] returns with its value or an
+   exception. In the latter case the exception is re-raised after
+   [finally]. If [finally] raises an exception when [work] has already
+   raised one, then the exception [Finally] is raised instead.
+
+    [protect] lets you manage resources reliably, under the following
+   conditions: 1) the acquisition either succeeds, or if it raises an
+   exception then it is without having acquired the resource (strong
+   exception safety); 2) the release of the resource never fails. If
+   the conditions are met, then the resource is guaranteed to have
+   been released when protect returns.
+
+    Note: this does not yet protect against asynchronous exceptions
+   raised inside [acquire] or [finally] by signal handlers, such as
+   Sys.Break.
+
+    @since 4.08.0 *)
+
+exception Finally of exn * exn
+(** Raised by [protect] when both [work] and [finally] raise an
+   exception. The first exception argument is the one raised by
+   [work], the second exception the one raised by [finally]. *)
+
