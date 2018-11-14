@@ -10,7 +10,7 @@ let does_raise f x =
 let double_raise () =
   let f () = raise Exit in
   try
-    Fun.protect ~acquire:(fun () -> ()) ~finally:f f ()
+    Fun.protect ~acquire:(fun () -> ()) ~release:f f ()
   with
   | Exit -> ()
 
