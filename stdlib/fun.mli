@@ -36,8 +36,8 @@ val protect : acquire:(unit -> 'a) -> finally:('a -> unit) -> ('a -> 'b) -> 'b
 (** [protect ~acquire ~finally work] invokes [acquires], then [work],
    and then invokes [finally] when [work] returns with its value or an
    exception. In the latter case the exception is re-raised after
-   [finally]. If [finally] raises an exception when [work] has already
-   raised one, then the exception [Finally] is raised instead.
+   [finally]. If [finally] raises an exception, then the exception
+   [Finally] is raised instead, as documented below.
 
     [protect] lets you manage resources reliably, under the following
    conditions: 1) the acquisition either succeeds, or if it raises an
@@ -52,8 +52,11 @@ val protect : acquire:(unit -> 'a) -> finally:('a -> unit) -> ('a -> 'b) -> 'b
 
     @since 4.08.0 *)
 
-exception Finally of exn * exn
-(** Raised by [protect] when both [work] and [finally] raise an
-   exception. The first exception argument is the one raised by
-   [work], the second exception the one raised by [finally]. *)
+exception Finally of { work : exn option; finally : exn; }
+(** Raised by [protect ~acquire ~finally work] when [finally] raises
+   an exception. The first exception argument is the one raised by
+   [work], if any, and the second exception the one raised by
+   [finally]. As a general rule, this exception should not be caught,
+   it denotes a programming error and the code should be modified not
+   to trigger it. *)
 
