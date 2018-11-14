@@ -27,16 +27,17 @@ external raise_with_backtrace: exn -> raw_backtrace -> 'a
 exception Finally of { work : exn option; finally : exn; }
 
 let protect ~acquire ~finally work =
-  let res = acquire () in
-  match work res with
-  | result ->
-      (try finally res with e -> raise (Finally { work = None; finally = e }));
-      result
-  | exception work_exn -> (
+  let finally_no_exn resource work_exn =
+    try finally resource with
+    | exn ->
+        let finally_bt = get_raw_backtrace () in
+        let new_exn = Finally { work = work_exn; finally = exn } in
+        raise_with_backtrace new_exn finally_bt
+  in
+  let resource = acquire () in
+  match work resource with
+  | result -> finally_no_exn resource None; result
+  | exception work_exn ->
       let work_bt = get_raw_backtrace () in
-      let new_exn = match finally res with
-        | () -> work_exn
-        | exception final_exn -> Finally { work = Some work_exn; finally = final_exn }
-      in
-      raise_with_backtrace new_exn work_bt
-    )
+      finally_no_exn resource (Some work_exn);
+      raise_with_backtrace work_exn work_bt
