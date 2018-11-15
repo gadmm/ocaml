@@ -18,24 +18,18 @@ let const c _ = c
 let flip f x y = f y x
 let negate p v = not (p v)
 
-type raw_backtrace
-external get_raw_backtrace:
-  unit -> raw_backtrace = "caml_get_exception_raw_backtrace"
-external raise_with_backtrace: exn -> raw_backtrace -> 'a
-  = "%raise_with_backtrace"
-
 exception Release_failure of exn
 
 let protect ~acquire ~(release : _ -> unit) work =
   let release_no_exn resource =
     try release resource with e ->
-      let bt = get_raw_backtrace () in
-      raise_with_backtrace (Release_failure e) bt
+      let bt = Printexc.get_raw_backtrace () in
+      Printexc.raise_with_backtrace (Release_failure e) bt
   in
   let resource = acquire () in
   match work resource with
   | result -> release_no_exn resource ; result
   | exception work_exn ->
-      let work_bt = get_raw_backtrace () in
+      let work_bt = Printexc.get_raw_backtrace () in
       release_no_exn resource ;
-      raise_with_backtrace work_exn work_bt
+      Printexc.raise_with_backtrace work_exn work_bt
