@@ -37,7 +37,7 @@ val protect : acquire:(unit -> 'a) -> release:('a -> unit) -> ('a -> 'b) -> 'b
    and then invokes [release] when [work] returns with its value or an
    exception. In the latter case the exception is re-raised after
    [release]. If [release] raises an exception, then the exception
-   [Release_failure] is raised instead, as documented below.
+   [Release_failure] is raised instead (see [Release_failure] below).
 
     [protect] lets you manage resources reliably, under the following
    conditions: 1) the acquisition either succeeds, or if it raises an
@@ -49,9 +49,7 @@ val protect : acquire:(unit -> 'a) -> release:('a -> unit) -> ('a -> 'b) -> 'b
     Note: [protect] does not yet protect against asynchronous
    exceptions raised inside [acquire] or [release] by signal handlers,
    such as Sys.Break. Furthermore, an asynchronous exception in
-   [release] can be promoted into a [Release_failure] exception.
-
-    @since 4.08.0 *)
+   [release] can be promoted into a [Release_failure] exception.  *)
 
 exception Release_failure of exn
 (** Raised by [protect] when [~release] raises an exception. The

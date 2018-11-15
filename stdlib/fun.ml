@@ -26,11 +26,11 @@ external raise_with_backtrace: exn -> raw_backtrace -> 'a
 
 exception Release_failure of exn
 
-let protect ~acquire ~release work =
+let protect ~acquire ~(release : _ -> unit) work =
   let release_no_exn resource =
     try release resource with e ->
-      let finally_bt = get_raw_backtrace () in
-      raise_with_backtrace (Release_failure e) finally_bt
+      let bt = get_raw_backtrace () in
+      raise_with_backtrace (Release_failure e) bt
   in
   let resource = acquire () in
   match work resource with
