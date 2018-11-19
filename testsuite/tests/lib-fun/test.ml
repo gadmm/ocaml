@@ -24,11 +24,27 @@ let test_negate () =
   assert (Fun.negate (Bool.equal true) false = true);
   ()
 
+let test_with_resource () =
+  let does_raise f x =
+    try f x ; false
+    with _ -> true
+  in
+  let double_raise () =
+    let f () = raise Exit in
+    try
+      Fun.with_resource ~acquire:(fun () -> ()) ~release:f f ()
+    with
+    | Exit -> ()
+  in
+  assert (does_raise double_raise ())
+
+
 let tests () =
   test_id ();
   test_const ();
   test_flip ();
   test_negate ();
+  test_with_resource ();
   ()
 
 let () =

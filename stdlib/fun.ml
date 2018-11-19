@@ -18,13 +18,13 @@ let const c _ = c
 let flip f x y = f y x
 let negate p v = not (p v)
 
-exception Release_failure of exn
+exception Release_raised of exn
 
 let protect ~acquire ~(release : _ -> unit) work =
   let release_no_exn resource =
     try release resource with e ->
       let bt = Printexc.get_raw_backtrace () in
-      Printexc.raise_with_backtrace (Release_failure e) bt
+      Printexc.raise_with_backtrace (Release_raised e) bt
   in
   let resource = acquire () in
   match work resource with
