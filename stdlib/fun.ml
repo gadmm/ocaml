@@ -20,7 +20,7 @@ let negate p v = not (p v)
 
 exception Release_raised of exn
 
-let protect ~acquire ~(release : _ -> unit) work =
+let with_resource ~acquire ~(release : _ -> unit) work =
   let release_no_exn resource =
     try release resource with e ->
       let bt = Printexc.get_raw_backtrace () in
