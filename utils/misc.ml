@@ -55,13 +55,13 @@ let try_and_reraise ~exceptionally f =
 type ref_and_value = R : 'a ref * 'a -> ref_and_value
 
 let protect_refs =
-  let set_refs l = List.iter (fun (R (r, v)) -> r := v) l in
+  let set_refs l = List.iter (fun (R (r, v)) -> r := v) l (* no alloc *) in
   fun refs f ->
     let backup = List.map (fun (R (r, _)) -> R (r, !r)) refs in
-    set_refs refs;
-    match f () with
-    | x           -> set_refs backup; x
-    | exception e -> set_refs backup; raise e
+    Fun.with_resource
+      ~acquire:(fun () -> set_refs refs)
+      ~release:(fun () -> set_refs backup)
+      f
 
 (* List functions *)
 
@@ -354,10 +354,10 @@ let string_of_file ic =
   in copy()
 
 let output_to_file_via_temporary ?(mode = [Open_text]) filename fn =
-  let (temp_filename, oc) =
-    Filename.open_temp_file
-       ~mode ~perms:0o666 ~temp_dir:(Filename.dirname filename)
-       (Filename.basename filename) ".tmp" in
+  Filename.with_temp_file
+    ~mode ~perms:0o666 ~temp_dir:(Filename.dirname filename)
+    (Filename.basename filename) ".tmp"
+  @@ fun temp_filename oc ->
     (* The 0o666 permissions will be modified by the umask.  It's just
        like what [open_out] and [open_out_bin] do.
        With temp_dir = dirname filename, we ensure that the returned
@@ -367,16 +367,10 @@ let output_to_file_via_temporary ?(mode = [Open_text]) filename fn =
        the first generated name will be unique.  A fixed prefix
        would work too but might generate more collisions if many
        files are being produced simultaneously in the same directory. *)
-  match fn temp_filename oc with
-  | res ->
-      close_out oc;
-      begin try
-        Sys.rename temp_filename filename; res
-      with exn ->
-        remove_file temp_filename; raise exn
-      end
-  | exception exn ->
-      close_out oc; remove_file temp_filename; raise exn
+  let res = fn temp_filename oc in
+  flush oc ;
+  Sys.rename temp_filename filename ;
+  res
 
 (* Integer operations *)
 

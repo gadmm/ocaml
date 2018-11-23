@@ -89,8 +89,9 @@ let record_call ?(accumulate = false) name f =
     else Measure_diff.zero (), Hashtbl.create 2
   in
   hierarchy := E this_table;
-  Misc.try_finally f
-    ~always:(fun () ->
+  Fun.protect f
+    (* actual finally *)
+    ~finally:(fun () ->
         hierarchy := E prev_hierarchy;
         let end_measure = Measure.create () in
         let measure_diff =

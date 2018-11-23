@@ -33,6 +33,7 @@ let build_diversion lst =
   let (responsefile, oc) = Filename.open_temp_file "camlresp" "" in
   List.iter (fun f -> Printf.fprintf oc "%s\n" f) lst;
   close_out oc;
+  (* would benefit from a better abstraction for temp files *)
   at_exit (fun () -> Misc.remove_file responsefile);
   "@" ^ responsefile
 
