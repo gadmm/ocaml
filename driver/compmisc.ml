@@ -74,16 +74,34 @@ let read_clflags_from_env () =
   set_from_env Clflags.error_style Clflags.error_style_reader;
   ()
 
+let _with_formatter_of_out_channel ch f =
+  (* We would like to make it a resource modelled on
+     Misc.with_out. Can we do it ? *)
+  Fun.with_resource
+    (* let flush raise if it fails after f completes successfully *)
+    (fun ppf -> f ppf ; Format.pp_print_flush ppf)
+    (* acquiring is fine: nothing to undo if it fails unexpectedly *)
+    ~acquire:(fun () -> Format.formatter_of_out_channel ch)
+    (* Format.pp_print_flush allocates: we decide to fail silently on
+       Out_of_memory (say). This is like Misc.with_out where
+       flushing is best-effort on error. *)
+    ~release:(fun ppf ->
+        try Format.pp_print_flush ppf ()
+        with _ -> () )
+    (* But this might result in dropping signals if they are raised during
+       release! All we need, in fact, is masking of signals to make it correct. *)
+
 let with_ppf_dump ~fileprefix f =
-  let ppf_dump, finally =
-    if not !Clflags.dump_into_file
-    then Format.err_formatter, ignore
-    else
-       let ch = open_out (fileprefix ^ ".dump") in
-       let ppf = Format.formatter_of_out_channel ch in
-       ppf,
-       (fun () ->
-         Format.pp_print_flush ppf ();
-         close_out ch)
-  in
-  Misc.try_finally (fun () -> f ppf_dump) ~always:finally
+  if not !Clflags.dump_into_file
+  then f Format.err_formatter
+  else
+    Misc.with_out (fileprefix ^ ".dump") @@ fun ch ->
+    let ppf = Format.formatter_of_out_channel ch in
+    Fun.protect
+      (* Resource or not a resource? See with_formatter_of_out_channel
+         which uses Fun.with_resource for an alternative approach. The
+         difference with this one is what happens in case [~finally]
+         fails unexpectedly when an exception is already being
+         raised. *)
+      ~finally:(Format.pp_print_flush ppf)
+      (fun () -> f ppf)

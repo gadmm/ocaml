@@ -39,11 +39,10 @@ let to_bytecode i (typedtree, coercion) =
 
 let emit_bytecode i (bytecode, required_globals) =
   let cmofile = cmo i in
-  let oc = open_out_bin cmofile in
-  Misc.try_finally
-    ~always:(fun () -> close_out oc)
+  Misc.try_and_reraise
     ~exceptionally:(fun () -> Misc.remove_file cmofile)
     (fun () ->
+       Misc.with_out_bin cmofile @@ fun oc ->
        bytecode
        |> Profile.(record ~accumulate:true generate)
          (Emitcode.to_file oc i.modulename cmofile ~required_globals);

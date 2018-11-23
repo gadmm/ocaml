@@ -96,8 +96,9 @@ let parse_impl i =
   |> print_if i.ppf_dump Clflags.dump_source Pprintast.structure
 
 let typecheck_impl i parsetree =
-  let always () = Stypes.dump (Some (annot i)) in
-  Misc.try_finally ~always (fun () ->
+  (* a genuine finally (which can raise in case of error) *)
+  let finally () = Stypes.dump (Some (annot i)) in
+  Fun.protect ~finally (fun () ->
     parsetree
     |> Profile.(record typing)
       (Typemod.type_implementation
@@ -120,7 +121,8 @@ let implementation ~tool_name ~native ~backend ~sourcefile ~outputprefix =
       let exceptionally () =
         List.iter (fun suf -> remove_file (suf info)) sufs;
       in
-      Misc.try_finally ~exceptionally (fun () -> backend info typed)
+      Misc.try_and_reraise ~exceptionally @@ fun () ->
+      backend info typed
     end;
   end;
   Warnings.check_fatal ();

@@ -91,16 +91,13 @@ let apply_rewriter kind fn_in ppx =
   fn_out
 
 let read_ast (type a) (kind : a ast_kind) fn : a =
-  let ic = open_in_bin fn in
-  Misc.try_finally
-    ~always:(fun () -> close_in ic; Misc.remove_file fn)
-    (fun () ->
-       let magic = magic_of_kind kind in
-       let buffer = really_input_string ic (String.length magic) in
-       assert(buffer = magic); (* already checked by apply_rewriter *)
-       Location.input_name := (input_value ic : string);
-       (input_value ic : a)
-    )
+  Misc.with_filename fn @@ fun fn ->
+  Misc.with_in_bin fn @@ fun ic ->
+  let magic = magic_of_kind kind in
+  let buffer = really_input_string ic (String.length magic) in
+  assert(buffer = magic); (* already checked by apply_rewriter *)
+  Location.input_name := (input_value ic : string);
+  (input_value ic : a)
 
 let rewrite kind ppxs ast =
   let fn = Filename.temp_file "camlppx" "" in
@@ -215,11 +212,15 @@ let () =
 let parse_file ~tool_name invariant_fun parse kind sourcefile =
   Location.input_name := sourcefile;
   let inputfile = preprocess sourcefile in
-  Misc.try_finally
+  Fun.protect
+    (* would benefit from a better abstraction for temp files. Good
+       example of why we want to move resources: converting preprocess
+       into a "with_preprocess" forces a bigger refactoring than we
+       want (try it). *)
     (fun () ->
        Profile.record_call "parsing" @@ fun () ->
        file_aux ~tool_name inputfile parse invariant_fun kind)
-    ~always:(fun () -> remove_preprocessed inputfile)
+    ~finally:(fun () -> remove_preprocessed inputfile)
 
 module ImplementationHooks = Misc.MakeHooks(struct
     type t = Parsetree.structure
