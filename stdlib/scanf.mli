@@ -149,10 +149,14 @@ val close_in : in_channel -> unit
   @since 3.12.0
 *)
 
+val close_in_noerr : in_channel -> unit
+(** TODO
+*)
+
 val from_file : file_name -> in_channel
 (** An alias for {!Scanning.open_in} above. *)
 
-val from_file_bin : string -> in_channel
+val from_file_bin : file_name -> in_channel
 (** An alias for {!Scanning.open_in_bin} above. *)
 
 val from_string : string -> in_channel
@@ -177,6 +181,11 @@ val from_channel : Stdlib.in_channel -> in_channel
     input channel which reads from the regular {!Stdlib.in_channel} input
     channel [ic] argument.
     Reading starts at current reading position of [ic].
+*)
+
+val with_open : ('a -> in_channel) -> 'a -> (in_channel -> 'b) -> 'b
+(** Open a channel in a scope; raise normal errors if the function
+    succeeds but flushing or closing the file fails.
 *)
 
 val end_of_input : in_channel -> bool

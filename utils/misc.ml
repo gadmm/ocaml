@@ -49,6 +49,9 @@ let try_finally ?(always=(fun () -> ())) ?(exceptionally=(fun () -> ())) work =
           Printexc.raise_with_backtrace always_exn always_bt
       end
 
+let try_and_reraise ~exceptionally f =
+  try f () with e -> exceptionally (); raise e
+
 type ref_and_value = R : 'a ref * 'a -> ref_and_value
 
 let protect_refs =
@@ -265,11 +268,38 @@ let find_in_path_uncap path name =
   in try_dir path
 
 let remove_file filename =
+  (* no alloc *)
   try
     if Sys.file_exists filename
     then Sys.remove filename
   with Sys_error _msg ->
     ()
+
+let with_filename filename f =
+  Fun.with_resource
+    ~acquire:(fun () -> filename)
+    ~release:remove_file
+    f
+
+let with_out_channel open_out_channel name f =
+  Fun.with_resource
+    ~acquire:(fun () -> open_out_channel name)
+    ~release:close_out_noerr
+    (fun oc -> let res = f oc in close_out oc; res)
+
+let with_out name = with_out_channel open_out name
+let with_out_bin name = with_out_channel open_out_bin name
+let with_out_gen mode perms name = with_out_channel (open_out_gen mode perms) name
+
+let with_in_channel open_in_channel name f =
+  Fun.with_resource
+    ~acquire:(fun () -> open_in_channel name)
+    ~release:close_in_noerr
+    (fun ic -> let res = f ic in close_in ic; res)
+
+let with_in name = with_in_channel open_in name
+let with_in_bin name = with_in_channel open_in_bin name
+
 
 (* Expand a -I option: if it starts with +, make it relative to the standard
    library directory *)

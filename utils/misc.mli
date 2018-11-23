@@ -50,7 +50,7 @@ val try_finally :
         ~exceptionally:(fun _exn -> remove_file objfile);
     ]}
 
-    If [exceptionally] fail with an exception, it is propagated as
+    If [exceptionally] fails with an exception, it is propagated as
     usual.
 
     If [always] or [exceptionally] use exceptions internally for
@@ -59,6 +59,10 @@ val try_finally :
     for easier debugging.
 *)
 
+val try_and_reraise : exceptionally:(unit -> unit) -> (unit -> 'a) -> 'a
+(** [try_and_reraise ~exceptionally f] runs [f] and, runs
+    [exceptionally] if it raises, then re-raises the exception. It
+    preserves the backtrace.  *)
 
 val map_end: ('a -> 'b) -> 'a list -> 'b list -> 'b list
         (* [map_end f l t] is [map f l @ t], just more efficient. *)
@@ -162,7 +166,30 @@ val find_in_path_uncap: string list -> string -> string
            if name is Foo.ml, allow /path/Foo.ml and /path/foo.ml
            to match. *)
 val remove_file: string -> unit
-        (* Delete the given file if it exists. Never raise an error. *)
+(* Delete the given file if it exists. Never raise an error, do not allocate. *)
+
+val with_filename: string -> (string -> 'a) -> 'a
+(* Delete the file of this name at the end of the call.
+   FIXME: bad abstraction. Replace with a proper abstraction for
+   temporary files. *)
+
+val with_out: string -> (out_channel -> 'a) -> 'a
+(* Open a file in a scope; raise normal errors if the function
+   succeeds but flushing or closing the file fails. Wrapper for
+   {!Stdlib.open_out}.  *)
+val with_out_bin: string -> (out_channel -> 'a) -> 'a
+(* Similar to {!with_out} but acts as a wrapper for
+   {!Stdlib.open_out_bin} instead. *)
+val with_out_gen: open_flag list -> int -> string -> (out_channel -> 'a) -> 'a
+(* Similar to {!with_out} but acts as a wrapper for
+   {!Stdlib.open_out_gen} instead. *)
+val with_in: string -> (in_channel -> 'a) -> 'a
+(* Similar to {!with_out} but acts as a wrapper for
+   {!Stdlib.open_in} instead. *)
+val with_in_bin: string -> (in_channel -> 'a) -> 'a
+(* Similar to {!with_in} but acts as a wrapper for
+   {!Stdlib.open_in_bin} instead. *)
+
 val expand_directory: string -> string -> string
         (* [expand_directory alt file] eventually expands a [+] at the
            beginning of file into [alt] (an alternate root directory) *)

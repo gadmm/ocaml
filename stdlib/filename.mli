@@ -131,6 +131,8 @@ val temp_file : ?temp_dir: string -> string -> string -> string
    [temp_file] was called.
    Raise [Sys_error] if the file could not be created.
    @before 3.11.2 no ?temp_dir optional argument
+
+   FIXME: bad!
 *)
 
 val open_temp_file :
@@ -150,7 +152,18 @@ val open_temp_file :
    @raise Sys_error if the file could not be opened.
    @before 4.03.0 no ?perms optional argument
    @before 3.11.2 no ?temp_dir optional argument
+
+   FIXME: bad!
 *)
+
+val with_temp_filename :
+  ?temp_dir: string -> string -> string -> (string -> 'a) -> 'a
+(** safer *)
+
+val with_temp_file :
+  ?mode: open_flag list -> ?perms: int -> ?temp_dir: string -> string ->
+  string -> (string -> out_channel -> 'a) -> 'a
+(** safer still *)
 
 val get_temp_dir_name : unit -> string
 (** The name of the temporary directory:

@@ -280,6 +280,51 @@ let temp_file ?(temp_dir = !current_temp_dir_name) prefix suffix =
       if counter >= 1000 then raise e else try_name (counter + 1)
   in try_name 0
 
+let with_temp_file ?(mode = [Open_text]) ?(perms = 0o600)
+    ?(temp_dir = !current_temp_dir_name) prefix suffix f =
+  let exception Retry in
+  let open_mode = Open_wronly::Open_creat::Open_excl::mode in
+  let rec try_name counter =
+    let name = temp_file_name temp_dir prefix suffix in
+    try
+      Fun.with_resource
+        ~acquire:(fun () ->
+            try
+              open_out_gen open_mode perms name
+            with Sys_error _ as e ->
+              if counter >= 1000 then raise e else raise Retry )
+        ~release:(fun oc ->
+            try
+              close_out oc ; Sys.remove name
+            with Sys_error _ -> () )
+        (fun oc -> f name oc)
+    with Retry -> try_name (counter + 1)
+  in
+  try_name 0
+
+let with_temp_filename ?(temp_dir = !current_temp_dir_name) prefix suffix f =
+  (* FIXME: almost equal to
+     [with_temp_file ~temp_dir prefix suffix (fun name oc -> close_out oc; f name)]
+  *)
+  let exception Retry in
+  let open_mode = [Open_wronly; Open_creat; Open_excl] in
+  let rec try_name counter =
+    let name = temp_file_name temp_dir prefix suffix in
+    try
+      Fun.with_resource
+        ~acquire:(fun () ->
+            try
+              close_desc (open_desc name open_mode 0o600); name
+            with Sys_error _ as e ->
+              if counter >= 1000 then raise e else raise Retry )
+        ~release:(fun name ->
+            try
+              Sys.remove name
+            with Sys_error _ -> () )
+        f
+    with Retry -> try_name (counter + 1)
+  in try_name 0
+
 let open_temp_file ?(mode = [Open_text]) ?(perms = 0o600)
                    ?(temp_dir = !current_temp_dir_name) prefix suffix =
   let rec try_name counter =

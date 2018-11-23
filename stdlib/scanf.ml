@@ -128,7 +128,10 @@ module type SCANNING = sig
   val from_function : (unit -> char) -> in_channel
   val from_channel : Stdlib.in_channel -> in_channel
 
+  val with_open : ('a -> in_channel) -> 'a -> (in_channel -> 'b) -> 'b
+
   val close_in : in_channel -> unit
+  val close_in_noerr : in_channel -> unit
 
   val memo_from_channel : Stdlib.in_channel -> in_channel
   (* Obsolete. *)
@@ -391,7 +394,6 @@ module Scanning : SCANNING = struct
   let from_channel ic =
     from_ic_raise_at_end (From_channel ic) ic
 
-
   let close_in ib =
     match ib.ic_input_name with
     | From_channel ic ->
@@ -399,6 +401,18 @@ module Scanning : SCANNING = struct
     | From_file (_fname, ic) -> Stdlib.close_in ic
     | From_function | From_string -> ()
 
+  let close_in_noerr ib =
+    match ib.ic_input_name with
+    | From_channel ic ->
+      Stdlib.close_in_noerr ic
+    | From_file (_fname, ic) -> Stdlib.close_in_noerr ic
+    | From_function | From_string -> ()
+
+  let with_open open_in name f =
+    Fun.with_resource
+      ~acquire:(fun () -> open_in name)
+      ~release:close_in_noerr
+      (fun ic -> let res = f ic in close_in ic; res)
 
   (*
      Obsolete: a memo [from_channel] version to build a [Scanning.in_channel]
