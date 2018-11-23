@@ -38,7 +38,11 @@ exception Error of error
 let debugger_symtable = ref (None: Symtable.global_map option)
 
 let use_debugger_symtable fn arg =
-  let old_symtable = Symtable.current_state() in
+  Fun.with_resource
+    (* idiomatic for a temporary mutation *)
+    ~acquire:Symtable.current_state
+    ~release:Symtable.restore_state
+  @@ fun _ ->
   begin match !debugger_symtable with
   | None ->
       Compdynlink.init();
@@ -47,12 +51,9 @@ let use_debugger_symtable fn arg =
   | Some st ->
       Symtable.restore_state st
   end;
-  Misc.try_finally (fun () ->
-      let result = fn arg in
-      debugger_symtable := Some(Symtable.current_state());
-      result
-    )
-    ~always:(fun () -> Symtable.restore_state old_symtable)
+  let result = fn arg in
+  debugger_symtable := Some(Symtable.current_state()) ;
+  result
 
 (* Load a .cmo or .cma file *)
 
