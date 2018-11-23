@@ -620,8 +620,15 @@ let set_printing_env env =
   end
 
 let wrap_printing_env env f =
-  set_printing_env env; reset_naming_context ();
-  try_finally f ~always:(fun () -> set_printing_env Env.empty)
+  Fun.protect
+    ~finally:(fun () -> set_printing_env Env.empty)
+    (* the mutations could be encapsulated as transactions with
+       resources (with better support), but not useful here. The
+       finally is correct because there is no race. *)
+    (fun () ->
+       set_printing_env env;
+       reset_naming_context ();
+       f () )
 
 let wrap_printing_env ~error env f =
   if error then Env.without_cmis (wrap_printing_env env) f

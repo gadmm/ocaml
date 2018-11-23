@@ -1848,10 +1848,11 @@ let occur_univar env ty =
           end
       | _ -> iter_type_expr (occur_rec bound) ty
   in
-  Misc.try_finally (fun () ->
+  Fun.protect (fun () ->
       occur_rec TypeSet.empty ty
     )
-    ~always:(fun () -> unmark_type ty)
+    (* actual finally *)
+    ~finally:(fun () -> unmark_type ty)
 
 (* Grouping univars by families according to their binders *)
 let add_univars =
@@ -1914,9 +1915,13 @@ let enter_poly env univar_pairs t1 tl1 t2 tl2 f =
     univars_escape env old_univars tl2 (newty(Tpoly(t1,tl1)));
   let cl1 = List.map (fun t -> t, ref None) tl1
   and cl2 = List.map (fun t -> t, ref None) tl2 in
-  univar_pairs := (cl1,cl2) :: (cl2,cl1) :: old_univars;
-  Misc.try_finally (fun () -> f t1 t2)
-    ~always:(fun () -> univar_pairs := old_univars)
+  Fun.with_resource
+    (* More useful than Fun.protect in this occurrence? Probably
+       not. Shows temporary mutations and transactions could be
+       abstracted with resource-management ? Yes. *)
+    ~acquire:(fun () -> univar_pairs := (cl1,cl2) :: (cl2,cl1) :: old_univars)
+    ~release:(fun () -> univar_pairs := old_univars)
+  @@ fun () -> f t1 t2
 
 let univar_pairs = ref []
 
@@ -3520,8 +3525,9 @@ and eqtype_row rename type_pairs subst env row1 row2 =
 let eqtype_list rename type_pairs subst env tl1 tl2 =
   univar_pairs := [];
   let snap = Btype.snapshot () in
-  Misc.try_finally
-    ~always:(fun () -> backtrack snap)
+  Fun.protect
+    (* actual finally *)
+    ~finally:(fun () -> backtrack snap)
     (fun () -> eqtype_list rename type_pairs subst env tl1 tl2)
 
 let eqtype rename type_pairs subst env t1 t2 =

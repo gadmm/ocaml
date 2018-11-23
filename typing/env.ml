@@ -2247,7 +2247,7 @@ let save_signature_with_imports ~deprecated sg modname filename imports =
       (match deprecated with Some s -> [Deprecated s] | None -> []);
     ]
   in
-  Misc.try_finally (fun () ->
+  Misc.try_and_reraise (fun () ->
       let cmi = {
         cmi_name = modname;
         cmi_sign = sg;

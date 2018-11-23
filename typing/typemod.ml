@@ -2241,7 +2241,28 @@ let () =
 
 let type_implementation sourcefile outputprefix modulename initial_env ast =
   Cmt_format.clear ();
-  Misc.try_finally (fun () ->
+  Misc.try_and_reraise
+    (* Hides a notion of binary annotation files as transactions.
+       Here the release could be tasked with enforcing the invariant:
+       “any cmt file left in existence is valid, denoting either a
+       partial or a total implementation”.
+
+       [let release () =
+          try
+            if not !completed then save_partial_implementation ();
+            close_file ();
+          with _ -> remove_file ()]
+
+       This is a sketch of a correct [release], except for
+       asynchronous exceptions that might end-up being dropped,
+       so all we need masking.
+    *)
+    ~exceptionally:(fun () ->
+        Cmt_format.save_cmt  (outputprefix ^ ".cmt") modulename
+          (Cmt_format.Partial_implementation
+             (Array.of_list (Cmt_format.get_saved_types ())))
+          (Some sourcefile) initial_env None)
+    (fun () ->
       Typecore.reset_delayed_checks ();
       Env.reset_required_globals ();
       if !Clflags.print_types then (* #7656 *)
@@ -2304,11 +2325,6 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
         end
       end
     )
-    ~exceptionally:(fun () ->
-        Cmt_format.save_cmt  (outputprefix ^ ".cmt") modulename
-          (Cmt_format.Partial_implementation
-             (Array.of_list (Cmt_format.get_saved_types ())))
-          (Some sourcefile) initial_env None)
 
 let type_implementation sourcefile outputprefix modulename initial_env ast =
   ImplementationHooks.apply_hooks { Misc.sourcefile }

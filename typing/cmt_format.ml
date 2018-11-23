@@ -111,10 +111,8 @@ let output_cmt oc cmt =
 
 let read filename =
 (*  Printf.fprintf stderr "Cmt_format.read %s\n%!" filename; *)
-  let ic = open_in_bin filename in
-  Misc.try_finally
-    ~always:(fun () -> close_in ic)
-    (fun () ->
+  Misc.with_in_bin filename
+    (fun ic ->
        let magic_number = read_magic_number ic in
        let cmi, cmt =
          if magic_number = Config.cmt_magic_number then
