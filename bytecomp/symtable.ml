@@ -163,10 +163,7 @@ let init () =
     Runtimedef.builtin_exceptions;
   (* Initialize the known C primitives *)
   let set_prim_table_from_file primfile =
-    let ic = open_in primfile in
-    Misc.try_finally
-      ~always:(fun () -> close_in ic)
-      (fun () ->
+    Misc.with_in primfile (fun ic ->
          try
            while true do
              set_prim_table (input_line ic)
@@ -177,10 +174,7 @@ let init () =
   if String.length !Clflags.use_prims > 0 then
     set_prim_table_from_file !Clflags.use_prims
   else if String.length !Clflags.use_runtime > 0 then begin
-    let primfile = Filename.temp_file "camlprims" "" in
-    Misc.try_finally
-      ~always:(fun () -> remove_file primfile)
-      (fun () ->
+    Filename.with_temp_filename "camlprims" "" (fun primfile ->
          if Sys.command(Printf.sprintf "%s -p > %s"
                           !Clflags.use_runtime primfile) <> 0
          then raise(Error(Wrong_vm !Clflags.use_runtime));

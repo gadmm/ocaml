@@ -172,7 +172,6 @@ let assert_failed exp =
               [Const_base(Const_string (fname, None));
                Const_base(Const_int line);
                Const_base(Const_int char)]))], exp.exp_loc))], exp.exp_loc)
-;;
 
 let rec cut n l =
   if n = 0 then ([],l) else
@@ -181,13 +180,39 @@ let rec cut n l =
 
 (* Translation of expressions *)
 
-let rec iter_exn_names f pat =
-  match pat.pat_desc with
-  | Tpat_var (id, _) -> f id
-  | Tpat_alias (p, id, _) ->
-      f id;
-      iter_exn_names f p
-  | _ -> ()
+(* Register the names of the exception so Re-raise happens. *)
+let with_register_exn_names pat =
+  let rec iter_exn_names f pat =
+    match pat.pat_desc with
+    | Tpat_var (id, _) -> f id
+    | Tpat_alias (p, id, _) ->
+        f id;
+        iter_exn_names f p
+    | _ -> ()
+  in
+  (* Here we have an example where the acquisition is not atomic, but
+     is nevertheless correct. First, [~release] does not allocate, and
+     therefore it cannot fail even in the event of asynchronous
+     exceptions or OOM. Second, acquisition is not safe for
+     asynchronous exceptions, but this is not an issue: we are dealing
+     with a structure that is not shared with the rest of the world.
+
+     Moreover, the idiomatic thing (with better resource support)
+     would be to model atomic transactions as resources, e.g.:
+
+       [let _guard =
+          map_exn_names (Translprim.change_exception_ident) c_lhs in
+        (c_lhs, transl_guard c_guard c_rhs)]
+
+     where 1) [map_exn_names : (_ -> 'a) -> 'a list] can return a list
+     of resources and 2) [Translprim.change_exception_ident] makes an
+     atomic acquisition and returns a guard performing the
+     clean-up. So the end goal is to get asynchronous-exception-
+     safety out of the box, by vitue of being able to combine
+     asynchronous-exception-safe primitives.  *)
+  Fun.with_resource
+    ~acquire:(fun () -> iter_exn_names Translprim.add_exception_ident pat)
+    ~release:(fun () -> iter_exn_names Translprim.remove_exception_ident pat)
 
 let rec transl_exp e =
   List.iter (Translattribute.check_attribute e) e.exp_attributes;
@@ -197,8 +222,8 @@ let rec transl_exp e =
       Texp_function _ | Texp_for _ | Texp_while _ -> false
     | _ -> true
   in
-  if eval_once then transl_exp0 e else
-  Translobj.oo_wrap e.exp_env true transl_exp0 e
+  if eval_once then transl_exp0 e
+  else Translobj.oo_wrap e.exp_env true transl_exp0 e
 
 and transl_exp0 e =
   match e.exp_desc with
@@ -548,11 +573,8 @@ and transl_cases cases =
   List.map transl_case cases
 
 and transl_case_try {c_lhs; c_guard; c_rhs} =
-  iter_exn_names Translprim.add_exception_ident c_lhs;
-  Misc.try_finally
-    (fun () -> c_lhs, transl_guard c_guard c_rhs)
-    ~always:(fun () ->
-        iter_exn_names Translprim.remove_exception_ident c_lhs)
+  with_register_exn_names c_lhs (fun () ->
+      (c_lhs, transl_guard c_guard c_rhs) )
 
 and transl_cases_try cases =
   let cases =
@@ -834,13 +856,8 @@ and transl_match e arg pat_expr_list partial =
         let ids  = Typedtree.pat_bound_idents pv in
         let vids = List.map Ident.rename ids in
         let pv = alpha_pat (List.combine ids vids) pv in
-        (* Also register the names of the exception so Re-raise happens. *)
-        iter_exn_names Translprim.add_exception_ident pe;
-        let rhs =
-          Misc.try_finally
-            (fun () -> event_before c_rhs (transl_exp c_rhs))
-            ~always:(fun () ->
-                iter_exn_names Translprim.remove_exception_ident pe)
+        let rhs = with_register_exn_names pe @@ fun () ->
+          event_before c_rhs (transl_exp c_rhs)
         in
         (pv, static_raise vids) :: val_cases,
         (pe, static_raise ids) :: exn_cases,

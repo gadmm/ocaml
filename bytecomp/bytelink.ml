@@ -306,13 +306,11 @@ let link_bytecode tolink exec_name standalone =
       raise (Error (Wrong_object_name exec_name));
     | _ -> ()) tolink;
   Misc.remove_file exec_name; (* avoid permission problems, cf PR#1911 *)
-  let outchan =
-    open_out_gen [Open_wronly; Open_trunc; Open_creat; Open_binary]
-                 0o777 exec_name in
-  Misc.try_finally
-    ~always:(fun () -> close_out outchan)
+  Misc.try_and_reraise
     ~exceptionally:(fun () -> remove_file exec_name)
     (fun () ->
+       let mode = [Open_wronly; Open_trunc; Open_creat; Open_binary] in
+       Misc.with_out_gen mode 0o777 exec_name @@ fun outchan ->
        if standalone then begin
          (* Copy the header *)
          try
@@ -423,13 +421,11 @@ let output_data_string outchan data =
 
 let output_cds_file outfile =
   Misc.remove_file outfile;
-  let outchan =
-    open_out_gen [Open_wronly; Open_trunc; Open_creat; Open_binary]
-      0o777 outfile in
-  Misc.try_finally
-    ~always:(fun () -> close_out outchan)
+  Misc.try_and_reraise
     ~exceptionally:(fun () -> remove_file outfile)
     (fun () ->
+       let mode = [Open_wronly; Open_trunc; Open_creat; Open_binary] in
+       Misc.with_out_gen mode 0o777 outfile @@ fun outchan ->
        Bytesections.init_record outchan;
        (* The map of global identifiers *)
        Symtable.output_global_map outchan;
@@ -444,11 +440,9 @@ let output_cds_file outfile =
 (* Output a bytecode executable as a C file *)
 
 let link_bytecode_as_c tolink outfile =
-  let outchan = open_out outfile in
-  Misc.try_finally
-    ~always:(fun () -> close_out outchan)
+  Misc.try_and_reraise
     ~exceptionally:(fun () -> remove_file outfile)
-    (fun () ->
+    (fun () -> Misc.with_out outfile @@ fun outchan ->
        (* The bytecode *)
        output_string outchan "\
 #define CAML_INTERNALS\
@@ -581,17 +575,14 @@ let link objfiles output_name =
   if not !Clflags.custom_runtime then
     link_bytecode tolink output_name true
   else if not !Clflags.output_c_object then begin
-    let bytecode_name = Filename.temp_file "camlcode" "" in
-    let prim_name =
+    Filename.with_temp_filename "camlcode" "" @@ fun bytecode_name ->
+    let with_prim_name f =
       if !Clflags.keep_camlprimc_file then
-        output_name ^ ".camlprim.c"
+        f (output_name ^ ".camlprim.c")
       else
-        Filename.temp_file "camlprim" ".c" in
-    Misc.try_finally
-      ~always:(fun () ->
-          remove_file bytecode_name;
-          if not !Clflags.keep_camlprimc_file then remove_file prim_name)
-      (fun () ->
+        Filename.with_temp_filename "camlprim" ".c" f
+    in
+    with_prim_name (fun prim_name ->
          link_bytecode tolink bytecode_name false;
          let poc = open_out prim_name in
          (* note: builds will not be reproducible if the C code contains macros
@@ -639,8 +630,15 @@ let link objfiles output_name =
       else basename ^ Config.ext_obj
     in
     let temps = ref [] in
-    Misc.try_finally
-      ~always:(fun () -> List.iter remove_file !temps)
+    Fun.protect
+      (* Correctly, the ~finally branch does not allocate. But the
+         acquisition is incorrect. This is not resource-safe in the
+         strict sense. With an abstraction for temp files one could
+         disentangle these spaghetti and have it resource-safe by
+         construction.
+         This is a kind of move semantics in reverse, actually.  Also
+         compare with the original code...  *)
+      ~finally:(fun () -> List.iter remove_file !temps)
       (fun () ->
          link_bytecode_as_c tolink c_file;
          if not (Filename.check_suffix output_name ".c") then begin
