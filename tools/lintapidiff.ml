@@ -187,18 +187,16 @@ module Git = struct
   let with_show ~f rev path =
     let obj = rev ^ ":" ^ path in
     let suffix = Printf.sprintf "-%s:%s" rev (Filename.basename path) in
-    let tmp = Filename.temp_file "lintapidiff" suffix in
+    Filename.with_temp_filename "lintapidiff" suffix @@ fun tmp ->
     let cmd = Printf.sprintf "git show %s >%s 2>/dev/null"
         (Filename.quote obj) (Filename.quote tmp) in
-    Misc.try_finally (fun () ->
-        match Sys.command cmd with
-        | 0 -> Ok (f tmp)
-        | 128 -> Error `Not_found
-        | r ->
-            Location.errorf ~loc:(in_file obj) "exited with code %d" r |>
-            Format.eprintf "%a@." Location.report_error;
-            Error `Exit)
-      (fun () -> Misc.remove_file tmp)
+    match Sys.command cmd with
+    | 0 -> Ok (f tmp)
+    | 128 -> Error `Not_found
+    | r ->
+        Location.errorf ~loc:(in_file obj) "exited with code %d" r |>
+        Format.eprintf "%a@." Location.report_error;
+        Error `Exit
 end
 
 module Diff = struct

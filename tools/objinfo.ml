@@ -243,23 +243,19 @@ let dump_byte ic =
 
 let read_dyn_header filename ic =
   let helper = Filename.concat Config.standard_library "objinfo_helper" in
-  let tempfile = Filename.temp_file "objinfo" ".out" in
   try
-    try_finally
-      ~always:(fun () -> remove_file tempfile)
-      (fun () ->
+    Filename.with_temp_filename "objinfo" ".out"
+      (fun tempfile ->
          let rc = Sys.command (sprintf "%s %s > %s"
                                  (Filename.quote helper)
                                  (Filename.quote filename)
                                  tempfile) in
          if rc <> 0 then failwith "cannot read";
-         let tc = Scanf.Scanning.from_file tempfile in
-         try_finally
-           ~always:(fun () -> Scanf.Scanning.close_in tc)
-           (fun () ->
+         Scanf.Scanning.(with_open from_file) tempfile
+           (fun tc ->
               let ofs = Scanf.bscanf tc "%Ld" (fun x -> x) in
               LargeFile.seek_in ic ofs;
-              Some(input_value ic : dynheader)))
+              Some(input_value ic : dynheader)) )
   with Failure _ | Sys_error _ -> None
 
 let dump_obj filename =
