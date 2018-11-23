@@ -53,3 +53,29 @@ exception Finally_raised of exn
     Stack_overflow, or any asynchronous exception raised by signal
     handlers (e.g.  Sys.Break); it should be treated similarly to
     those. *)
+
+val with_resource :
+  acquire:(unit -> 'a) -> release:('a -> unit) -> ('a -> 'b) -> 'b
+(** [with_resource ~acquire ~release work] invokes [acquire], then
+    [work], and then invokes [release] when [work] returns with its
+    value or an exception. In the latter case the exception is re-
+    raised after [release]. If [release] raises an exception, [exit 2]
+    is called.
+
+    [with_resource] lets you manage resources reliably, under the
+    following conditions: 1) the acquisition either succeeds, or if it
+    raises an exception of any kind, then it is without having acquired
+    the resource (strong exception safety); 2) the release of the
+    resource never fails. One must take into account exceptions that
+    can be raised at allocation points (Out_of_memory, asynchronous
+    exceptions); in particular [release] must not allocate. If the
+    conditions are met, then the resource is guaranteed to have been
+    released when [with_resource] returns.
+
+    [with_resource] can be used to enforce invariants about the state
+    of the world, even in the event of Out_of_memory, Stack_overflow,
+    or asynchronous exceptions raised by signal handlers (e.g.
+    Sys.Break).
+
+    (This safety guarantee is currently only supported in native code.)
+ *)

@@ -30,3 +30,14 @@ let protect ~(finally : unit -> unit) work =
       let work_bt = Printexc.get_raw_backtrace () in
       finally_no_exn () ;
       Printexc.raise_with_backtrace work_exn work_bt
+
+let with_resource ~acquire ~(release : _ -> unit) work =
+  let release_no_exn release resource =
+    try Printexc.catch release resource
+    with _ -> exit 2 (* printing error message failed *)
+  in
+  let resource = acquire () in
+  (* no allocs : critical section for asynchronous exceptions *)
+  match work resource with
+  | result -> release_no_exn release resource ; result
+  | exception e -> release_no_exn release resource ; raise e

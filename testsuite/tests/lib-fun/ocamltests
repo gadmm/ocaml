@@ -1,1 +1,4 @@
 test.ml
+with_resource_raise.ml
+with_resource_alloc.ml
+with_resource_signal.ml

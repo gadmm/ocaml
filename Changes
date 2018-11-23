@@ -124,6 +124,12 @@ Working version
   Bobot, Nicolás Ojeda Bär, Xavier Clerc, Boris Yakobowski, and
   Guillaume Munch-Maccagnoni)
 
+- GPR#2118: Add `Fun.with_resource ~acquire ~release` for defining
+  resource-management abstractions which are safe even in the event of
+  unexpected exceptions, inspired by [Control.Exception.bracket] in
+  Haskell.
+  (Guillaume Munch-Maccagnoni, review by Daniel Bünzli and TODO)
+
 - GPR#1986, MPR#6450: Add Set.disjoint
   (Nicolás Ojeda Bär, review by Gabriel Scherer)
 
