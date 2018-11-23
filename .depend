@@ -31,8 +31,8 @@ utils/misc.cmi : utils/build_path_prefix_map.cmi
 utils/numbers.cmo : utils/misc.cmi utils/identifiable.cmi utils/numbers.cmi
 utils/numbers.cmx : utils/misc.cmx utils/identifiable.cmx utils/numbers.cmi
 utils/numbers.cmi : utils/identifiable.cmi
-utils/profile.cmo : utils/misc.cmi utils/profile.cmi
-utils/profile.cmx : utils/misc.cmx utils/profile.cmi
+utils/profile.cmo : utils/profile.cmi
+utils/profile.cmx : utils/profile.cmi
 utils/profile.cmi :
 utils/strongly_connected_components.cmo : utils/numbers.cmi utils/misc.cmi \
     utils/identifiable.cmi utils/strongly_connected_components.cmi

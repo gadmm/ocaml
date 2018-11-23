@@ -148,23 +148,26 @@ let compile_unit _output_prefix asm_filename keep_asm
       obj_filename gen =
   let create_asm = keep_asm || not !Emitaux.binary_backend_available in
   Emitaux.create_asm_file := create_asm;
-  Misc.try_finally
-    ~exceptionally:(fun () -> remove_file obj_filename)
+  Misc.try_and_reraise
+    (* would benefit from a better abstraction for temp files (see
+       elsewhere) *)
+    ~exceptionally:(fun () ->
+        remove_file obj_filename;
+        if create_asm && not keep_asm then remove_file asm_filename)
     (fun () ->
-       if create_asm then Emitaux.output_channel := open_out asm_filename;
-       Misc.try_finally gen
-         ~always:(fun () ->
-             if create_asm then close_out !Emitaux.output_channel)
-         ~exceptionally:(fun () ->
-             if create_asm && not keep_asm then remove_file asm_filename);
-       let assemble_result =
-         Profile.record "assemble"
-           (Proc.assemble_file asm_filename) obj_filename
-       in
-       if assemble_result <> 0
-       then raise(Error(Assembler_error asm_filename));
-       if create_asm && not keep_asm then remove_file asm_filename
-    )
+       if create_asm then
+         Misc.with_out asm_filename @@ fun asm_out ->
+         Emitaux.output_channel := asm_out;
+         gen ()
+       else
+         gen () );
+  let assemble_result =
+    Profile.record "assemble"
+      (Proc.assemble_file asm_filename) obj_filename
+  in
+  if assemble_result <> 0
+  then raise(Error(Assembler_error asm_filename));
+  if create_asm && not keep_asm then remove_file asm_filename
 
 let set_export_info (ulambda, prealloc, structured_constants, export) =
   Compilenv.set_export_info export;

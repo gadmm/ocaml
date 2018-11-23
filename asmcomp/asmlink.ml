@@ -279,10 +279,11 @@ let link_shared ~ppf_dump objfiles output_name =
       (List.rev !Clflags.ccobjs) in
 
     let startup =
+      (* would benefit from a better abstraction for temp files *)
       if !Clflags.keep_startup_file || !Emitaux.binary_backend_available
       then output_name ^ ".startup" ^ ext_asm
       else Filename.temp_file "camlstartup" ext_asm in
-    let startup_obj = output_name ^ ".startup" ^ ext_obj in
+    Misc.with_filename (output_name ^ ".startup" ^ ext_obj) @@ fun startup_obj ->
     Asmgen.compile_unit output_name
       startup !Clflags.keep_startup_file startup_obj
       (fun () ->
@@ -290,7 +291,6 @@ let link_shared ~ppf_dump objfiles output_name =
            (List.map (fun (ui,_,crc) -> (ui,crc)) units_tolink)
       );
     call_linker_shared (startup_obj :: objfiles) output_name;
-    remove_file startup_obj
   )
 
 let call_linker file_list startup_file output_name =
@@ -345,18 +345,16 @@ let link ~ppf_dump objfiles output_name =
     Clflags.all_ccopts := !lib_ccopts @ !Clflags.all_ccopts;
                                                  (* put user's opts first *)
     let startup =
+      (* would benefit from a better abstraction for temp files *)
       if !Clflags.keep_startup_file || !Emitaux.binary_backend_available
       then output_name ^ ".startup" ^ ext_asm
       else Filename.temp_file "camlstartup" ext_asm in
-    let startup_obj = Filename.temp_file "camlstartup" ext_obj in
+    Filename.with_temp_filename "camlstartup" ext_obj @@ fun startup_obj ->
     Asmgen.compile_unit output_name
       startup !Clflags.keep_startup_file startup_obj
       (fun () -> make_startup_file ~ppf_dump units_tolink);
-    Misc.try_finally
-      (fun () ->
-         call_linker (List.map object_file_name objfiles)
-           startup_obj output_name)
-      ~always:(fun () -> remove_file startup_obj)
+    call_linker (List.map object_file_name objfiles)
+      startup_obj output_name
   )
 
 (* Error report *)

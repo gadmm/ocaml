@@ -48,11 +48,13 @@ let read_info name =
 
 let create_archive file_list lib_name =
   let archive_name = Filename.remove_extension lib_name ^ ext_lib in
-  let outchan = open_out_bin lib_name in
-  Misc.try_finally
-    ~always:(fun () -> close_out outchan)
-    ~exceptionally:(fun () -> remove_file lib_name; remove_file archive_name)
-    (fun () ->
+  Misc.try_and_reraise
+    ~exceptionally:(fun _ -> remove_file lib_name; remove_file archive_name)
+    (* I'd rather see here an abstraction for temp files as
+       pessimistic transactions, i.e. with a [commit] or [rename]
+       operation called explicitly in case of success, rather than
+       try_and_reraise. *)
+    (fun () -> Misc.with_out_bin lib_name @@ fun outchan ->
        output_string outchan cmxa_magic_number;
        let (objfile_list, descr_list) =
          List.split (List.map read_info file_list) in
