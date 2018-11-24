@@ -31,7 +31,7 @@ let protect ~(finally : unit -> unit) work =
       finally_no_exn () ;
       Printexc.raise_with_backtrace work_exn work_bt
 
-let with_resource ~acquire ~(release : _ -> unit) work =
+let with_resource_native ~acquire ~(release : _ -> unit) work =
   let release_no_exn release resource =
     try Printexc.catch release resource
     with _ -> exit 2 (* printing error message failed *)
@@ -41,3 +41,38 @@ let with_resource ~acquire ~(release : _ -> unit) work =
   match work resource with
   | result -> release_no_exn release resource ; result
   | exception e -> release_no_exn release resource ; raise e
+
+let set_mask sigs = Unix.(sigprocmask SIG_SETMASK) sigs
+
+let all_sigs = Sys.([sigabrt; sigalrm; sigfpe; sighup;
+                     sigill; sigint; sigkill; sigpipe;
+                     sigquit; sigsegv; sigterm; sigusr1;
+                     sigusr2; sigchld; sigcont; sigstop;
+                     sigtstp; sigttin; sigttou; sigvtalrm;
+                     sigprof; sigbus; sigpoll; sigsys;
+                     sigtrap; sigurg; sigxcpu; sigxfsz])
+
+(* Broken *)
+let with_resource_bytecode ~acquire ~(release : _ -> unit) work =
+  let release_no_exn release resource =
+    let old_mask = set_mask all_sigs (* native: allocates *) in
+    let _ =
+      try Printexc.catch release resource
+      with _ -> exit 2 (* printing error message failed *)
+    in
+    ignore (set_mask old_mask)
+  in
+  let old_mask = set_mask all_sigs in
+  let resource = try acquire () with e -> ignore (set_mask old_mask); raise e in
+  (* no allocs : critical section for asynchronous exceptions *)
+  match
+    ignore (set_mask old_mask);
+    work resource
+  with
+  | result -> release_no_exn release resource ; result
+  | exception e -> release_no_exn release resource ; raise e
+
+let with_resource =
+  if Sys.os_type = "Unix" && Sys.backend_type = Sys.Bytecode
+  then with_resource_bytecode
+  else with_resource_native

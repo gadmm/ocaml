@@ -1,6 +1,7 @@
 (* TEST
 include unix
    * native
+   * bytecode
 
 (* Test only implemented on Unix. It currently fails with bytecode. *)
 *)
