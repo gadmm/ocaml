@@ -9,6 +9,24 @@ let tick = 0.001 (* 1 ms *)
 
 exception Alarm
 
+let _ =
+  if Sys.os_type <> "Unix" then begin
+    (* not implemented *)
+    print_endline "Control 1:
+Passed
+Control 2:
+Passed
+Test 1:
+Passed
+Test 2:
+Passed
+Test 3:
+Passed
+Test 4:
+Passed";
+    exit 0;
+  end
+
 let block, unblock =
   let set x () =
     try ignore (Unix.sigprocmask x [Sys.sigalrm])
@@ -33,13 +51,6 @@ type pass = Pass | Fail
 
 let report b =
   print_string (if b == Pass then "Passed\n" else "Failed\n")
-
-let if_unix, fork, kill =
-  if Sys.os_type = "Unix" then
-    (fun f -> f), Unix.fork, Unix.kill
-  else
-    (* not implemented *)
-    (fun _ _ -> report Pass), (fun () -> 1), (fun _ _ -> ())
 
 let check_receive_signal () =
   let _ =
@@ -96,23 +107,23 @@ let repeat_test_with_resource f =
 
 let test_signal pid =
   print_endline "Control 1:";
-  if_unix check_receive_signal ();
+  check_receive_signal ();
   print_endline "Control 2:";
-  if_unix check_block_signal ();
+  check_block_signal ();
   print_endline "Test 1:";
-  if_unix repeat_test_with_resource (fun () -> block_signal tick);
+  repeat_test_with_resource (fun () -> block_signal tick);
   print_endline "Test 2:";
-  if_unix repeat_test_with_resource (fun () -> ());
+  repeat_test_with_resource (fun () -> ());
   print_endline "Test 3:";
-  if_unix repeat_test_with_resource (fun () -> raise Exit);
+  repeat_test_with_resource (fun () -> raise Exit);
   print_endline "Test 4:";
-  if_unix repeat_test_with_resource Unix.pause;
-  kill pid Sys.sigkill
+  repeat_test_with_resource Unix.pause;
+  Unix.kill pid Sys.sigkill
 
 let _ =
   try
     Printexc.record_backtrace true;
-    match fork () with
+    match Unix.fork () with
     | 0 -> command (Unix.getppid ())
     | pid -> test_signal pid
   with e -> Printexc.print_backtrace stderr; raise e
