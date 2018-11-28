@@ -246,7 +246,7 @@ let find_in_path_uncap path name =
   in try_dir path
 
 let remove_file filename =
-  (* no alloc *)
+  (* polls *)
   try
     if Sys.file_exists filename
     then Sys.remove filename
@@ -256,12 +256,14 @@ let remove_file filename =
 let with_filename filename f =
   Fun.with_resource
     ~acquire:(fun () -> filename)
+    (* correct with masking *)
     ~release:remove_file
     f
 
 let with_out_channel open_out_channel name f =
   Fun.with_resource
     ~acquire:(fun () -> open_out_channel name)
+    (* correct with masking *)
     ~release:close_out_noerr
     (fun oc -> let res = f oc in close_out oc; res)
 
@@ -272,6 +274,7 @@ let with_out_gen mode perms name = with_out_channel (open_out_gen mode perms) na
 let with_in_channel open_in_channel name f =
   Fun.with_resource
     ~acquire:(fun () -> open_in_channel name)
+    (* correct with masking *)
     ~release:close_in_noerr
     (fun ic -> let res = f ic in close_in ic; res)
 

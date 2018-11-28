@@ -88,8 +88,7 @@ let _with_formatter_of_out_channel ch f =
     ~release:(fun ppf ->
         try Format.pp_print_flush ppf ()
         with _ -> () )
-    (* But this might result in dropping signals if they are raised during
-       release! All we need, in fact, is masking of signals to make it correct. *)
+    (* Note: this requires masking. *)
 
 let with_ppf_dump ~fileprefix f =
   if not !Clflags.dump_into_file

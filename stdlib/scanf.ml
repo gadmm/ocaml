@@ -411,7 +411,7 @@ module Scanning : SCANNING = struct
   let with_open open_in name f =
     Fun.with_resource
       ~acquire:(fun () -> open_in name)
-      ~release:close_in_noerr
+      ~release:close_in_noerr (* correct with masking *)
       (fun ic -> let res = f ic in close_in ic; res)
 
   (*

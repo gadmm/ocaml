@@ -294,9 +294,9 @@ let with_temp_file ?(mode = [Open_text]) ?(perms = 0o600)
             with Sys_error _ as e ->
               if counter >= 1000 then raise e else raise Retry )
         ~release:(fun oc ->
-            try
-              close_out oc ; Sys.remove name
-            with Sys_error _ -> () )
+            (* correct with masking *)
+            close_out_noerr oc ;
+            try Sys.remove name with Sys_error _ -> () )
         (fun oc -> f name oc)
     with Retry -> try_name (counter + 1)
   in
@@ -318,8 +318,8 @@ let with_temp_filename ?(temp_dir = !current_temp_dir_name) prefix suffix f =
             with Sys_error _ as e ->
               if counter >= 1000 then raise e else raise Retry )
         ~release:(fun name ->
-            try
-              Sys.remove name
+            (* correct with masking *)
+            try Sys.remove name
             with Sys_error _ -> () )
         f
     with Retry -> try_name (counter + 1)

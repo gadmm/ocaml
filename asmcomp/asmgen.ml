@@ -149,7 +149,7 @@ let compile_unit _output_prefix asm_filename keep_asm
   let create_asm = keep_asm || not !Emitaux.binary_backend_available in
   Emitaux.create_asm_file := create_asm;
   Misc.try_and_reraise
-    (* would benefit from a better abstraction for temp files (see
+    (* Would benefit from a better abstraction for temp files (see
        elsewhere) *)
     ~exceptionally:(fun () ->
         remove_file obj_filename;
