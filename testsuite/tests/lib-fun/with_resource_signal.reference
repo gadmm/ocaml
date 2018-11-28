@@ -2,11 +2,35 @@ Control 1:
 Passed
 Control 2:
 Passed
-Test 1:
+Test inside=id, outside=id
 Passed
-Test 2:
+Test inside=id, outside=print
 Passed
-Test 3:
+Test inside=id, outside=block
 Passed
-Test 4:
+Test inside=id, outside=openclose
+Passed
+Test inside=print, outside=id
+Passed
+Test inside=print, outside=print
+Passed
+Test inside=print, outside=block
+Passed
+Test inside=print, outside=openclose
+Passed
+Test inside=block, outside=id
+Passed
+Test inside=block, outside=print
+Passed
+Test inside=block, outside=block
+Passed
+Test inside=block, outside=openclose
+Passed
+Test inside=openclose, outside=id
+Passed
+Test inside=openclose, outside=print
+Passed
+Test inside=openclose, outside=block
+Passed
+Test inside=openclose, outside=openclose
 Passed

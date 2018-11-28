@@ -27,12 +27,13 @@ Passed";
     exit 0;
   end
 
-let block, unblock =
-  let set x () =
-    try ignore (Unix.sigprocmask x [Sys.sigalrm])
-    with Alarm -> ()
-  in
-  set Unix.SIG_BLOCK, set Unix.SIG_UNBLOCK
+let block () =
+  try Sys.set_signal Sys.sigalrm (Sys.Signal_handle (fun _ -> ()))
+  with Alarm -> ()
+
+let unblock () =
+  try Sys.set_signal Sys.sigalrm (Sys.Signal_handle (fun _ -> raise Alarm))
+  with Alarm -> ()
 
 let _ =
   let handle _ = raise Alarm in
@@ -42,15 +43,17 @@ let _ =
 let time = Unix.gettimeofday
 
 let command ppid =
-  while true do
-    Unix.sleepf tick;
-    Unix.kill ppid Sys.sigalrm
-  done
+  try
+    while true do
+      Unix.sleepf tick;
+      Unix.kill ppid Sys.sigalrm
+    done
+  with Unix.Unix_error _ -> ()
 
 type pass = Pass | Fail
 
 let report b =
-  print_string (if b == Pass then "Passed\n" else "Failed\n")
+  print_endline (if b == Pass then "Passed" else "Failed")
 
 let check_receive_signal () =
   let _ =
@@ -81,14 +84,26 @@ let check_block_signal () =
   block ();
   report res
 
-let test_with_resource b x f =
+let test_with_resource branch count ~inside ~outside =
   let tock = 2.1 *. tick in
-  Fun.with_resource
-    ~acquire:(fun () -> incr x ; if b then block_signal tock)
-    ~release:(fun () -> if not b then block_signal tock ; decr x)
-    f
+  Fun.with_resource outside
+    ~acquire:(fun () ->
+        incr count ;
+        if branch then begin
+          block_signal tock ;
+          inside ()
+        end )
+    ~release:(fun r ->
+        try
+          if not branch then begin
+            block_signal tock ;
+            inside ()
+          end ;
+          decr count
+        with
+          _ -> () )
 
-let repeat_test_with_resource f =
+let repeat_test_with_resource ~inside ~outside =
   let start = time () in
   let tock = 150. *. tick in
   let x = ref 0 in
@@ -97,33 +112,43 @@ let repeat_test_with_resource f =
     try
       unblock ();
       while (time ()) -. start < tock do
-        (try test_with_resource true x f with _ -> ());
-        (try test_with_resource false y f with _ -> ())
+        (try test_with_resource ~inside ~outside true x with _ -> ()) ;
+        (try test_with_resource ~inside ~outside false y with _ -> ())
       done;
-      block ();
-    with _ -> block ()
+      block ()
+    with e -> block (); raise e
   in
   report (if !x = 0 && !y = 0 then Pass else Fail)
 
 let test_signal pid =
-  print_endline "Control 1:";
-  check_receive_signal ();
-  print_endline "Control 2:";
-  check_block_signal ();
-  print_endline "Test 1:";
-  repeat_test_with_resource (fun () -> block_signal tick);
-  print_endline "Test 2:";
-  repeat_test_with_resource (fun () -> ());
-  print_endline "Test 3:";
-  repeat_test_with_resource (fun () -> raise Exit);
-  print_endline "Test 4:";
-  repeat_test_with_resource Unix.pause;
+  print_endline "Control 1:" ;
+  check_receive_signal () ;
+  print_endline "Control 2:" ;
+  check_block_signal () ;
+  let funs =
+    [ "id", (fun () -> ())
+    ; "print",
+      (let out = open_out "/dev/null" in
+      (fun () -> output_string out "a" ; flush out) )
+    ; "block", (fun _ -> block_signal tick)
+    ; "openclose",
+      (fun _ ->
+         match open_in "/tmp/sthg" with
+         | f -> close_in f
+         | exception Unix.Unix_error _ -> () )
+    ] in
+  let test_pair (x,f) (y,g) =
+    Printf.printf "Test inside=%s, outside=%s\n" x y ;
+    flush stdout ;
+    repeat_test_with_resource ~inside:f ~outside:g
+  in
+  List.iter (fun x -> List.iter (test_pair x) funs) funs ;
   Unix.kill pid Sys.sigkill
 
 let _ =
   try
-    Printexc.record_backtrace true;
+    Printexc.record_backtrace true ;
     match Unix.fork () with
     | 0 -> command (Unix.getppid ())
     | pid -> test_signal pid
-  with e -> Printexc.print_backtrace stderr; raise e
+  with e -> Printexc.print_backtrace stderr ; raise e
