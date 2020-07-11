@@ -46,6 +46,9 @@ CAMLextern value caml_alloc_shr_with_profinfo (mlsize_t, tag_t, intnat);
 /* Variant of [caml_alloc_shr] where no memprof sampling is performed. */
 CAMLextern value caml_alloc_shr_no_track_noexc (mlsize_t, tag_t);
 
+/* Variant of [caml_alloc_shr] that returns NULL instead of raising. */
+CAMLextern value caml_alloc_shr_noexc (mlsize_t wosize, tag_t);
+
 /* Variant of [caml_alloc_shr] where no memprof sampling is performed,
    and re-using the profinfo associated with the header given in
    parameter. */

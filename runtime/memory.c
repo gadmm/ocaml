@@ -570,6 +570,12 @@ CAMLexport value caml_alloc_shr_no_track_noexc (mlsize_t wosize, tag_t tag)
   return caml_alloc_shr_aux (wosize, tag, 0, 0,
                              caml_spacetime_my_profinfo (NULL, wosize));
 }
+
+CAMLexport value caml_alloc_shr_noexc (mlsize_t wosize, tag_t tag)
+{
+  return caml_alloc_shr_aux (wosize, tag, 1, 0,
+                             caml_spacetime_my_profinfo (NULL, wosize));
+}
 #else
 CAMLexport value caml_alloc_shr (mlsize_t wosize, tag_t tag)
 {
@@ -579,6 +585,11 @@ CAMLexport value caml_alloc_shr (mlsize_t wosize, tag_t tag)
 CAMLexport value caml_alloc_shr_no_track_noexc (mlsize_t wosize, tag_t tag)
 {
   return caml_alloc_shr_aux (wosize, tag, 0, 0, NO_PROFINFO);
+}
+
+CAMLexport value caml_alloc_shr_noexc (mlsize_t wosize, tag_t tag)
+{
+  return caml_alloc_shr_aux (wosize, tag, 1, 0, NO_PROFINFO);
 }
 #endif
 

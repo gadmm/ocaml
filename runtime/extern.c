@@ -924,13 +924,12 @@ CAMLprim value caml_output_value_to_bytes(value v, value flags)
 
   init_extern_output();
   data_len = extern_value(v, flags, header, &header_len);
-  /* PR#4030: it is prudent to save extern_output_first before allocating
-     the result, as in caml_output_val */
-  blk = extern_output_first;
-  res = caml_alloc_string(header_len + data_len);
+  res = caml_alloc_string_noexc(header_len + data_len);
+  if (!res) extern_out_of_memory();
   ofs = 0;
   memcpy(&Byte(res, ofs), header, header_len);
   ofs += header_len;
+  blk = extern_output_first;
   while (blk != NULL) {
     intnat n = blk->end - blk->data;
     memcpy(&Byte(res, ofs), blk->data, n);

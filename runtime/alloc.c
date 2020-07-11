@@ -23,6 +23,7 @@
 #include <string.h>
 #include "caml/alloc.h"
 #include "caml/custom.h"
+#include "caml/fail.h"
 #include "caml/major_gc.h"
 #include "caml/memory.h"
 #include "caml/mlvalues.h"
@@ -93,7 +94,7 @@ CAMLexport value caml_alloc_tuple(mlsize_t n)
 }
 
 /* [len] is a number of bytes (chars) */
-CAMLexport value caml_alloc_string (mlsize_t len)
+CAMLexport value caml_alloc_string_noexc (mlsize_t len)
 {
   value result;
   mlsize_t offset_index;
@@ -102,13 +103,21 @@ CAMLexport value caml_alloc_string (mlsize_t len)
   if (wosize <= Max_young_wosize) {
     Alloc_small (result, wosize, String_tag);
   }else{
-    result = caml_alloc_shr (wosize, String_tag);
+    result = caml_alloc_shr_noexc (wosize, String_tag);
+    if (!result) return 0;
     result = caml_check_urgent_gc (result);
   }
   Field (result, wosize - 1) = 0;
   offset_index = Bsize_wsize (wosize) - 1;
   Byte (result, offset_index) = offset_index - len;
   return result;
+}
+
+CAMLexport value caml_alloc_string (mlsize_t len)
+{
+  value v = caml_alloc_string_noexc(len);
+  if (!v) caml_raise_out_of_memory();
+  return v;
 }
 
 /* [len] is a number of bytes (chars) */
