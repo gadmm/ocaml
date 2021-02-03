@@ -22,6 +22,11 @@ OCaml 4.12.0 (24 February 2021)
    Stdlib.{equal,compare}.)
   (Gabriel Scherer, review by Nicolás Ojeda Bär, Daniel Bünzli and Alain Frisch)
 
+- #9934: Optimise sweeping using prefetching.
+  (Stephen Dolan and Will Hasenplaugh, review by David Allsopp, Xavier
+   Leroy and Damien Doligez, benchmarking by Shubham Kumar and KC
+   Sivaramakrishnan)
+
 - #9066: a new Either module with
   type 'a Either.t = Left of 'a | Right of 'b
   (Gabriel Scherer, review by Daniel Bünzli, Thomas Refis, Jeremy Yallop)
