@@ -240,6 +240,11 @@ int caml_page_table_remove(int kind, void * start, void * end)
   return 0;
 }
 
+static uintnat round_up(uintnat n, uintnat mod)
+{
+  return (n + mod - 1) / mod * mod;
+}
+
 /* Allocate a block of the requested size, to be passed to
    [caml_add_to_heap] later.
    [request] will be rounded up to some implementation-dependent size.
@@ -252,38 +257,84 @@ int caml_page_table_remove(int kind, void * start, void * end)
 char *caml_alloc_for_heap (asize_t request)
 {
   char *mem;
+  asize_t request_virtual;
+  char *block;
   if (caml_use_huge_pages){
 #ifndef HAS_HUGE_PAGES
     return NULL;
 #else
-    uintnat size = Round_mmap_size (sizeof (heap_chunk_head) + request);
-    void *block;
+    uintnat size = round_up(request + sizeof(heap_chunk_head), Heap_page_size);
     block = mmap (NULL, size, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
     if (block == MAP_FAILED) return NULL;
-    mem = (char *) block + sizeof (heap_chunk_head);
+    mem = block + sizeof (heap_chunk_head);
     Chunk_size (mem) = size - sizeof (heap_chunk_head);
     Chunk_block (mem) = block;
 #endif
   }else{
-    void *block;
-
-    request = ((request + Page_size - 1) >> Page_log) << Page_log;
-    mem = caml_stat_alloc_aligned_noexc (request + sizeof (heap_chunk_head),
-                                         sizeof (heap_chunk_head), &block);
-    if (mem == NULL) return NULL;
-    mem += sizeof (heap_chunk_head);
-    Chunk_size (mem) = request;
-    Chunk_block (mem) = block;
+    asize_t reserve;
+    // todo: free on shutdown
+    // todo: have a better test for THP availability
+#ifdef HAS_HUGE_PAGES
+    int huge_pages = 1;//request > (Heap_page_size / 2);
+#else
+    int huge_pages = 0;
+#endif
+    uintnat large_page_size = huge_pages ? Heap_page_size : Page_size;
+    request = request + sizeof(heap_chunk_head);
+    request = round_up(request, large_page_size);
+    request_virtual = request + large_page_size;
+    block = mmap(NULL, request_virtual, PROT_NONE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (block == MAP_FAILED) return NULL;
+    mem = (char *) round_up((uintnat) block, large_page_size);
+    reserve = round_up(request, large_page_size);
+    CAMLassert((uintnat) mem + reserve <= (uintnat) block + request_virtual);
+#ifdef HAS_HUGE_PAGES
+    /* Request huge pages (THP), always. Note: this can cause large
+       pauses if /sys/kernel/mm/transparent_hugepage/defrag is set to
+       [always] or [madvise]. However, benefits are already observed
+       without this call.
+       TODO: Either one can let the user be responsible for their
+       defrag setting (at risk of breaking workflows), or one can
+       repurpose the H option for doing the call below. */
+    if (huge_pages) {
+      if (madvise(mem, request, MADV_HUGEPAGE) == -1) goto err;
+    }
+#endif
+    /* Commit [mem..mem+request[ */
+    if (mprotect(mem, request, PROT_READ | PROT_WRITE) == -1) goto err;
+    /* free beginning */
+    munmap(block, mem - block);
+    /* free end */
+    munmap(mem + reserve, request_virtual - (mem - block) - reserve);
+    /* [mem..mem+reserve[ is reserved */
+    block = mem;
+    mem += sizeof(heap_chunk_head);
+    Chunk_size(mem) = request - sizeof(heap_chunk_head);
+    Chunk_block(mem) = block;
+    Chunk_block_size(mem) = reserve;
   }
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_first.end = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_end = (value*)mem;
   return mem;
+ err:
+  munmap(block, request_virtual);
+  return NULL;
 }
 
-/* Use this function to free a block allocated with [caml_alloc_for_heap]
-   if you don't add it with [caml_add_to_heap].
+/* Same as caml_alloc_for_heap, but avoids e.g. serving a 4MB block in
+   response to a 2MB request. Instead, serve a block slightly smaller
+   than requested. */
+char *caml_alloc_for_minor_heap(asize_t request)
+{
+  return caml_alloc_for_heap(request - sizeof(heap_chunk_head));
+}
+
+/* Use this function to free a block allocated with
+   [caml_alloc_for_heap] or [caml_alloc_for_minor_heap] if you don't
+   add it with [caml_add_to_heap].
 */
 void caml_free_for_heap (char *mem)
 {
@@ -294,7 +345,7 @@ void caml_free_for_heap (char *mem)
     CAMLassert (0);
 #endif
   }else{
-    caml_stat_free (Chunk_block (mem));
+    munmap(Chunk_block(mem), Chunk_block_size(mem));
   }
 }
 

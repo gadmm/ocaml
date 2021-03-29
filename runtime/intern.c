@@ -610,9 +610,7 @@ static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
   }
   wosize = Wosize_whsize(whsize);
   if (wosize > Max_wosize) {
-    /* Round desired size up to next page */
-    asize_t request =
-      ((Bsize_wsize(whsize) + Page_size - 1) >> Page_log) << Page_log;
+    asize_t request = Bsize_wsize(whsize);
     intern_extra_block = caml_alloc_for_heap(request);
     if (intern_extra_block == NULL) {
       intern_cleanup();

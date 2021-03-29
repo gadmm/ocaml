@@ -124,7 +124,8 @@ define camlheader
 end
 
 define camlheap
-  if $arg0 >= Caml_state->young_start && $arg0 < Caml_state->young_end
+  if ($arg0 >= Caml_state->young_alloc_start &&
+      $arg0 < Caml_state->young_alloc_end)
     printf "YOUNG"
     set $camlheap_result = 1
   else

@@ -27,7 +27,8 @@ void caml_init_domain ()
     return;
 
   Caml_state =
-    (caml_domain_state*)caml_stat_alloc_noexc(sizeof(caml_domain_state));
+    (caml_domain_state*)aligned_alloc(8 * sizeof(value),
+                                      sizeof(caml_domain_state));
   if (Caml_state == NULL)
     caml_fatal_error ("cannot initialize domain state");
 
@@ -35,9 +36,6 @@ void caml_init_domain ()
   Caml_state->exception_pointer = NULL;
 
   Caml_state->young_ptr = NULL;
-  Caml_state->young_base = NULL;
-  Caml_state->young_start = NULL;
-  Caml_state->young_end = NULL;
   Caml_state->young_alloc_start = NULL;
   Caml_state->young_alloc_mid = NULL;
   Caml_state->young_alloc_end = NULL;

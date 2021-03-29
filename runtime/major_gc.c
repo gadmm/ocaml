@@ -582,8 +582,9 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   uintnat min_pb = Pb_min;
   struct mark_stack stk = *Caml_state->mark_stack;
 
-  uintnat young_start = (uintnat)Caml_state->young_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
+  uintnat young_start = (uintnat)Caml_state->young_alloc_start;
+  uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
+                            - (uintnat)Caml_state->young_alloc_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
 #ifdef NO_NAKED_POINTERS
@@ -1128,13 +1129,14 @@ void caml_init_major_heap (asize_t heap_size)
     (char *) caml_alloc_for_heap (Bsize_wsize (Caml_state->stat_heap_wsz));
   if (caml_heap_start == NULL)
     caml_fatal_error ("cannot allocate initial major heap");
+  heap_size = Chunk_size (caml_heap_start);
   Chunk_next (caml_heap_start) = NULL;
-  Caml_state->stat_heap_wsz = Wsize_bsize (Chunk_size (caml_heap_start));
+  Caml_state->stat_heap_wsz = Wsize_bsize (heap_size);
   Caml_state->stat_heap_chunks = 1;
   Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
 
   if (caml_page_table_add(In_heap, caml_heap_start,
-        caml_heap_start + Bsize_wsize (Caml_state->stat_heap_wsz))
+                          caml_heap_start + heap_size)
       != 0) {
     caml_fatal_error ("cannot allocate initial page table");
   }

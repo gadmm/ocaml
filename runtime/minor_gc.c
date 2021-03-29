@@ -34,14 +34,10 @@
 #include "caml/eventlog.h"
 
 /* Pointers into the minor heap.
-   [Caml_state->young_base]
-       The [malloc] block that contains the heap.
-   [Caml_state->young_start] ... [Caml_state->young_end]
-       The whole range of the minor heap: all young blocks are inside
-       this interval.
    [Caml_state->young_alloc_start]...[Caml_state->young_alloc_end]
        The allocation arena: newly-allocated blocks are carved from
        this interval, starting at [Caml_state->young_alloc_end].
+       All young blocks are inside this interval.
    [Caml_state->young_alloc_mid] is the mid-point of this interval.
    [Caml_state->young_ptr], [Caml_state->young_trigger],
    [Caml_state->young_limit]
@@ -139,11 +135,9 @@ static void clear_table (struct generic_table *tbl)
 void caml_set_minor_heap_size (asize_t bsz)
 {
   char *new_heap;
-  void *new_heap_base;
 
   CAMLassert (bsz >= Bsize_wsize(Minor_heap_min));
   CAMLassert (bsz <= Bsize_wsize(Minor_heap_max));
-  CAMLassert (bsz % Page_size == 0);
   CAMLassert (bsz % sizeof (value) == 0);
   if (Caml_state->young_ptr != Caml_state->young_alloc_end){
     CAML_EV_COUNTER (EV_C_FORCE_MINOR_SET_MINOR_HEAP_SIZE, 1);
@@ -153,23 +147,22 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
-  new_heap = caml_stat_alloc_aligned_noexc(bsz, 0, &new_heap_base);
+  new_heap = caml_alloc_for_minor_heap(bsz);
   if (new_heap == NULL) caml_raise_out_of_memory();
-  if (caml_page_table_add(In_young, new_heap, new_heap + bsz) != 0)
+  bsz = Chunk_size(new_heap);
+  if (caml_page_table_add(In_young, new_heap, new_heap + bsz) != 0) {
+    caml_free_for_heap(new_heap);
     caml_raise_out_of_memory();
-
-  if (Caml_state->young_start != NULL){
-    caml_page_table_remove(In_young, Caml_state->young_start,
-                           Caml_state->young_end);
-    caml_stat_free (Caml_state->young_base);
   }
-  Caml_state->young_base = new_heap_base;
-  Caml_state->young_start = (value *) new_heap;
-  Caml_state->young_end = (value *) (new_heap + bsz);
-  Caml_state->young_alloc_start = Caml_state->young_start;
+  if (Caml_state->young_alloc_start != NULL){
+    caml_page_table_remove(In_young, Caml_state->young_alloc_start,
+                           Caml_state->young_alloc_end);
+    caml_free_for_heap((char *)Caml_state->young_alloc_start);
+  }
+  Caml_state->young_alloc_start = (value *) new_heap;
+  Caml_state->young_alloc_end = (value *) (new_heap + bsz);
   Caml_state->young_alloc_mid =
     Caml_state->young_alloc_start + Wsize_bsize (bsz) / 2;
-  Caml_state->young_alloc_end = Caml_state->young_end;
   /* caml_update_young_limit called by caml_memprof_renew_minor_sample */
   Caml_state->young_trigger = Caml_state->young_alloc_start;
   Caml_state->young_ptr = Caml_state->young_alloc_end;
