@@ -118,7 +118,7 @@ CAMLexport void caml_do_exit(int retcode)
   if ((caml_verb_gc & 0x400) != 0) {
     /* cf caml_gc_counters */
     double minwords = Caml_state->stat_minor_words
-      + (double) (Caml_state->young_end - Caml_state->young_ptr);
+      + (double) (Caml_state->young_alloc_end - Caml_state->young_ptr);
     double prowords = Caml_state->stat_promoted_words;
     double majwords =
       Caml_state->stat_major_words + (double) caml_allocated_words;

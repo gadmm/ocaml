@@ -21,12 +21,10 @@ DOMAIN_STATE(value*, young_ptr)
 DOMAIN_STATE(char*, exception_pointer)
 /* Exception pointer that points into the current stack */
 
-DOMAIN_STATE(void*, young_base)
-DOMAIN_STATE(value*, young_start)
-DOMAIN_STATE(value*, young_end)
 DOMAIN_STATE(value*, young_alloc_start)
 DOMAIN_STATE(value*, young_alloc_end)
 DOMAIN_STATE(value*, young_alloc_mid)
+DOMAIN_STATE(asize_t, young_reserved)
 DOMAIN_STATE(value*, young_trigger)
 DOMAIN_STATE(asize_t, minor_heap_wsz)
 DOMAIN_STATE(intnat, in_minor_collection)

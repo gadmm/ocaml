@@ -35,12 +35,10 @@ void caml_init_domain (void)
   Caml_state->exception_pointer = NULL;
 
   Caml_state->young_ptr = NULL;
-  Caml_state->young_base = NULL;
-  Caml_state->young_start = NULL;
-  Caml_state->young_end = NULL;
   Caml_state->young_alloc_start = NULL;
   Caml_state->young_alloc_mid = NULL;
   Caml_state->young_alloc_end = NULL;
+  Caml_state->young_reserved = 0;
   Caml_state->young_trigger = NULL;
   Caml_state->minor_heap_wsz = 0;
   Caml_state->in_minor_collection = 0;

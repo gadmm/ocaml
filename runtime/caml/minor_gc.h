@@ -16,14 +16,14 @@
 #ifndef CAML_MINOR_GC_H
 #define CAML_MINOR_GC_H
 
-#include "address_class.h"
+#include "heap_map.h"
 #include "config.h"
 
 /* Global variables moved to Caml_state in 4.10 */
-#define caml_young_start (Caml_state_field(young_start))
-#define caml_young_end (Caml_state_field(young_end))
 #define caml_young_ptr (Caml_state_field(young_ptr))
 #define caml_young_limit (Caml_state_field(young_limit))
+#define caml_young_start caml_young_alloc_start
+#define caml_young_end caml_young_alloc_end
 #define caml_young_alloc_start (Caml_state_field(young_alloc_start))
 #define caml_young_alloc_end (Caml_state_field(young_alloc_end))
 #define caml_young_alloc_mid (Caml_state_field(young_alloc_mid))
