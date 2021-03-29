@@ -70,8 +70,6 @@
    (char *)(val) < (char *)Caml_state_field(young_end) && \
    (char *)(val) > (char *)Caml_state_field(young_start))
 
-#define Is_in_heap(a) (Classify_addr(a) & In_heap)
-
 #ifdef NO_NAKED_POINTERS
 
 #define Is_in_heap_or_young(a) 1
@@ -95,12 +93,61 @@
 #define In_heap 1
 #define In_young 2
 #define In_static_data 4
+#define Small_page_area 8
+
+#define Page(p) ((uintnat) (p) >> Page_log)
+#define Page_mask ((~(uintnat)0) << Page_log)
+#define Large_page_log (Page_log + 6)
+#define Large_page_size ((uintnat) 1 << Large_page_log)
+#define Large_page_mask(p) ((uintnat) (p) & ~(Large_page_size - 1))
 
 #ifdef ARCH_SIXTYFOUR
 
+/* 64-bit implementation:
+   The page table is represented sparsely as a hash table
+   with linear probing */
+
+struct page_table {
+  mlsize_t size;                /* size == 1 << (wordsize - shift) */
+  int shift;
+  mlsize_t mask;                /* mask == size - 1 */
+  mlsize_t occupancy;
+  uintnat * entries;            /* [size]  */
+};
+
+extern struct page_table caml_page_table;
+
+/* Page table entries are the logical 'or' of
+   - the key: address of a page (low Page_log bits = 0)
+   - the data: a 8-bit integer */
+
+#define Page_entry_matches(entry,addr) \
+  ((((entry) ^ (addr)) & Page_mask) == 0)
+
+/* Multiplicative Fibonacci hashing
+   (Knuth, TAOCP vol 3, section 6.4, page 518).
+   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
+#define CAML_HASH_FACTOR 11400714819323198486UL
+#define Caml_Hash(v) (((v) * CAML_HASH_FACTOR) >> caml_page_table.shift)
+
 /* 64 bits: Represent page table as a sparse hash table */
-int caml_page_table_lookup(void * addr);
-#define Classify_addr(a) (caml_page_table_lookup((void *)(a)))
+int caml_page_table_lookup(void *addr);
+
+#define Classify_addr(a) (caml_page_table_lookup((void *)a))
+
+int caml_page_table_proceed(uintnat addr, uintnat *i);
+
+inline uintnat caml_page_table_in_heap(void *addr)
+{
+  uintnat p = Large_page_mask(addr);
+  uintnat *i = &caml_page_table.entries[Caml_Hash(Page(p))];
+  uintnat e = *i;
+  /* The first hit is almost always successful, so optimize for this case */
+  if (LIKELY(Page_entry_matches(e,p))) return e;
+  return caml_page_table_proceed(p, i);
+}
+
+#define Is_in_heap(a) (LIKELY(caml_page_table_in_heap((void *)a) & In_heap))
 
 #else
 
@@ -116,6 +163,7 @@ CAMLextern unsigned char * caml_page_table[Pagetable1_size];
   ((((uintnat)(a)) >> Page_log) & (Pagetable2_size - 1))
 #define Classify_addr(a) \
   caml_page_table[Pagetable_index1(a)][Pagetable_index2(a)]
+#define Is_in_heap(a) (Classify_addr(a) & In_heap)
 
 #endif
 

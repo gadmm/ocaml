@@ -51,66 +51,45 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-#define Page(p) ((uintnat) (p) >> Page_log)
-#define Page_mask ((~(uintnat)0) << Page_log)
-
 #ifdef ARCH_SIXTYFOUR
 
-/* 64-bit implementation:
-   The page table is represented sparsely as a hash table
-   with linear probing */
+struct page_table caml_page_table;
 
-struct page_table {
-  mlsize_t size;                /* size == 1 << (wordsize - shift) */
-  int shift;
-  mlsize_t mask;                /* mask == size - 1 */
-  mlsize_t occupancy;
-  uintnat * entries;            /* [size]  */
-};
-
-static struct page_table caml_page_table;
-
-/* Page table entries are the logical 'or' of
-   - the key: address of a page (low Page_log bits = 0)
-   - the data: a 8-bit integer */
-
-#define Page_entry_matches(entry,addr) \
-  ((((entry) ^ (addr)) & Page_mask) == 0)
-
-/* Multiplicative Fibonacci hashing
-   (Knuth, TAOCP vol 3, section 6.4, page 518).
-   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
-#ifdef ARCH_SIXTYFOUR
-#define HASH_FACTOR 11400714819323198486UL
-#else
-#define HASH_FACTOR 2654435769UL
-#endif
-#define Hash(v) (((v) * HASH_FACTOR) >> caml_page_table.shift)
-
-int caml_page_table_lookup(void * addr)
+int caml_page_table_proceed(uintnat addr, uintnat *i)
 {
-  uintnat h, e;
-
-  h = Hash(Page(addr));
-  /* The first hit is almost always successful, so optimize for this case */
-  e = caml_page_table.entries[h];
-  if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
+  uintnat *end = caml_page_table.entries + caml_page_table.size;
+  uintnat e = *i;
   while(1) {
     if (e == 0) return 0;
-    h = (h + 1) & caml_page_table.mask;
-    e = caml_page_table.entries[h];
-    if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
+    if (++i == end) i = caml_page_table.entries;
+    e = *i;
+    if (Page_entry_matches(e, addr)) return e;
   }
+}
+
+static int lookup_page(uintnat addr)
+{
+  uintnat *i = &caml_page_table.entries[Caml_Hash(Page(addr))];
+  uintnat e = *i;
+  if (LIKELY(Page_entry_matches(e, addr))) return e & 0xFF;
+  return caml_page_table_proceed(addr, i) & 0xFF;
+}
+
+int caml_page_table_lookup(void *addr)
+{
+  int e = lookup_page(Large_page_mask(addr));
+  if ((e & Small_page_area) == 0) return e;
+  return lookup_page((uintnat)addr) & In_static_data;
 }
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-  uintnat pagesize = Page(bytesize);
+  uintnat pagesize = (uintnat) bytesize >> Large_page_log;
 
-  caml_page_table.size = 1;
-  caml_page_table.shift = 8 * sizeof(uintnat);
-  /* Aim for initial load factor between 1/4 and 1/2 */
-  while (caml_page_table.size < 2 * pagesize) {
+  caml_page_table.size = 2;
+  caml_page_table.shift = 8 * sizeof(uintnat) - 1;
+  /* Aim for initial load factor between 1/32 and 1/16 */
+  while (caml_page_table.size < 16 * pagesize) {
     caml_page_table.size <<= 1;
     caml_page_table.shift -= 1;
   }
@@ -149,7 +128,7 @@ static int caml_page_table_resize(void)
   for (i = 0; i < old.size; i++) {
     uintnat e = old.entries[i];
     if (e == 0) continue;
-    h = Hash(Page(e));
+    h = Caml_Hash(Page(e));
     while (caml_page_table.entries[h] != 0)
       h = (h + 1) & caml_page_table.mask;
     caml_page_table.entries[h] = e;
@@ -165,11 +144,11 @@ static int caml_page_table_modify(uintnat page, int toclear, int toset)
 
   CAMLassert ((page & ~Page_mask) == 0);
 
-  /* Resize to keep load factor below 1/2 */
-  if (caml_page_table.occupancy * 2 >= caml_page_table.size) {
+  /* Resize to keep load factor below 1/16 */
+  if (caml_page_table.occupancy * 16 >= caml_page_table.size) {
     if (caml_page_table_resize() != 0) return -1;
   }
-  h = Hash(Page(page));
+  h = Caml_Hash(Page(page));
   while (1) {
     if (caml_page_table.entries[h] == 0) {
       caml_page_table.entries[h] = page | toset;
@@ -218,25 +197,33 @@ static int caml_page_table_modify(uintnat page, int toclear, int toset)
 
 #endif
 
-int caml_page_table_add(int kind, void * start, void * end)
+static int page_table_modify_range(int toclear, int toset, uintnat page_size,
+                                   void * start, void * end)
 {
-  uintnat pstart = (uintnat) start & Page_mask;
-  uintnat pend = ((uintnat) end - 1) & Page_mask;
+  uintnat pstart = (uintnat) start & ~(page_size - 1);
+  uintnat pend = ((uintnat) end - 1) & ~(page_size - 1);
   uintnat p;
 
-  for (p = pstart; p <= pend; p += Page_size)
-    if (caml_page_table_modify(p, 0, kind) != 0) return -1;
+  for (p = pstart; p <= pend; p += page_size)
+    if (caml_page_table_modify(p, toclear, toset) != 0) return -1;
+  return 0;
+}
+
+int caml_page_table_add(int kind, void * start, void * end)
+{
+  if (kind == In_static_data) {
+    page_table_modify_range(0, Small_page_area, Large_page_size, start, end);
+    page_table_modify_range(0, In_static_data, Page_size, start, end);
+  } else {
+    page_table_modify_range(0, kind, Large_page_size, start, end);
+  }
   return 0;
 }
 
 int caml_page_table_remove(int kind, void * start, void * end)
 {
-  uintnat pstart = (uintnat) start & Page_mask;
-  uintnat pend = ((uintnat) end - 1) & Page_mask;
-  uintnat p;
-
-  for (p = pstart; p <= pend; p += Page_size)
-    if (caml_page_table_modify(p, kind, 0) != 0) return -1;
+  CAMLassert(kind != In_static_data);
+  page_table_modify_range(kind, 0, Large_page_size, start, end);
   return 0;
 }
 
@@ -258,9 +245,11 @@ char *caml_alloc_for_heap (asize_t request)
 #else
     uintnat size = Round_mmap_size (sizeof (heap_chunk_head) + request);
     void *block;
+    CAMLassert(Heap_page_size >= Large_page_size);
     block = mmap (NULL, size, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
     if (block == MAP_FAILED) return NULL;
+    CAMLassert( ((uintnat) block & (Large_page_size - 1)) == 0 );
     mem = (char *) block + sizeof (heap_chunk_head);
     Chunk_size (mem) = size - sizeof (heap_chunk_head);
     Chunk_block (mem) = block;
@@ -268,8 +257,10 @@ char *caml_alloc_for_heap (asize_t request)
   }else{
     void *block;
 
-    request = ((request + Page_size - 1) >> Page_log) << Page_log;
+    request =
+      ((request + Large_page_size - 1) >> Large_page_log) << Large_page_log;
     mem = caml_stat_alloc_aligned_noexc (request + sizeof (heap_chunk_head),
+                                         Large_page_size,
                                          sizeof (heap_chunk_head), &block);
     if (mem == NULL) return NULL;
     mem += sizeof (heap_chunk_head);
@@ -754,24 +745,26 @@ CAMLexport void caml_stat_destroy_pool(void)
 }
 
 /* [sz] and [modulo] are numbers of bytes */
-CAMLexport void* caml_stat_alloc_aligned_noexc(asize_t sz, int modulo,
-                                               caml_stat_block *b)
+CAMLexport void* caml_stat_alloc_aligned_noexc(asize_t sz, asize_t alignment,
+                                               int modulo, caml_stat_block *b)
 {
   char *raw_mem;
   uintnat aligned_mem;
-  CAMLassert (0 <= modulo && modulo < Page_size);
-  raw_mem = (char *) caml_stat_alloc_noexc(sz + Page_size);
+  // alignment must be a power of 2
+  CAMLassert(((uintnat) alignment & ((uintnat) alignment - 1)) == 0);
+  CAMLassert (0 <= modulo && modulo < alignment);
+  raw_mem = (char *) caml_stat_alloc_noexc(sz + alignment);
   if (raw_mem == NULL) return NULL;
   *b = raw_mem;
   raw_mem += modulo;                /* Address to be aligned */
-  aligned_mem = (((uintnat) raw_mem / Page_size + 1) * Page_size);
+  aligned_mem = (((uintnat) raw_mem / alignment + 1) * alignment);
 #ifdef DEBUG
   {
     uintnat *p;
     uintnat *p0 = (void *) *b;
     uintnat *p1 = (void *) (aligned_mem - modulo);
     uintnat *p2 = (void *) (aligned_mem - modulo + sz);
-    uintnat *p3 = (void *) ((char *) *b + sz + Page_size);
+    uintnat *p3 = (void *) ((char *) *b + sz + alignment);
     for (p = p0; p < p1; p++) *p = Debug_filler_align;
     for (p = p1; p < p2; p++) *p = Debug_uninit_align;
     for (p = p2; p < p3; p++) *p = Debug_filler_align;
@@ -780,11 +773,12 @@ CAMLexport void* caml_stat_alloc_aligned_noexc(asize_t sz, int modulo,
   return (char *) (aligned_mem - modulo);
 }
 
-/* [sz] and [modulo] are numbers of bytes */
-CAMLexport void* caml_stat_alloc_aligned(asize_t sz, int modulo,
-                                         caml_stat_block *b)
+/* [sz] and [modulo] are numbers of bytes, [alignment] is a power of
+   two number of bytes. */
+CAMLexport void* caml_stat_alloc_aligned(asize_t sz, asize_t alignment,
+                                         int modulo, caml_stat_block *b)
 {
-  void *result = caml_stat_alloc_aligned_noexc(sz, modulo, b);
+  void *result = caml_stat_alloc_aligned_noexc(sz, alignment, modulo, b);
   /* malloc() may return NULL if size is 0 */
   if ((result == NULL) && (sz != 0))
     caml_raise_out_of_memory();

@@ -56,7 +56,7 @@ void caml_init_atom_table(void)
   asize_t request = (256 + 1) * sizeof(header_t);
   request = (request + Page_size - 1) / Page_size * Page_size;
   caml_atom_table =
-    caml_stat_alloc_aligned_noexc(request, 0, &b);
+    caml_stat_alloc_aligned_noexc(request, Page_size, 0, &b);
 
   for(i = 0; i < 256; i++) {
     caml_atom_table[i] = Make_header(0, i, Caml_black);

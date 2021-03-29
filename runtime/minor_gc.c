@@ -140,10 +140,10 @@ void caml_set_minor_heap_size (asize_t bsz)
 {
   char *new_heap;
   void *new_heap_base;
+  asize_t full_page_bsz;
 
   CAMLassert (bsz >= Bsize_wsize(Minor_heap_min));
   CAMLassert (bsz <= Bsize_wsize(Minor_heap_max));
-  CAMLassert (bsz % Page_size == 0);
   CAMLassert (bsz % sizeof (value) == 0);
   if (Caml_state->young_ptr != Caml_state->young_alloc_end){
     CAML_EV_COUNTER (EV_C_FORCE_MINOR_SET_MINOR_HEAP_SIZE, 1);
@@ -153,7 +153,13 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
-  new_heap = caml_stat_alloc_aligned_noexc(bsz, 0, &new_heap_base);
+  /* Make sure an integral number of pages are reserved for the minor
+     heap, so that no page contains both bytecode and OCaml - values.
+     This would confuse, e.g., caml_hash. (PR#9128) */
+  full_page_bsz =
+    (bsz + Large_page_size - 1) / Large_page_size * Large_page_size;
+  new_heap = caml_stat_alloc_aligned_noexc(full_page_bsz, Large_page_size,
+                                           0, &new_heap_base);
   if (new_heap == NULL) caml_raise_out_of_memory();
   if (caml_page_table_add(In_young, new_heap, new_heap + bsz) != 0)
     caml_raise_out_of_memory();
