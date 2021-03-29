@@ -393,13 +393,8 @@ static uintnat norm_pmax (uintnat p)
 
 static intnat norm_minsize (intnat s)
 {
-  intnat page_wsize = Wsize_bsize(Page_size);
   if (s < Minor_heap_min) s = Minor_heap_min;
   if (s > Minor_heap_max) s = Minor_heap_max;
-  /* PR#9128 : Make sure the minor heap occupies an integral number of
-     pages, so that no page contains both bytecode and OCaml
-     values. This would confuse, e.g., caml_hash. */
-  s = (s + page_wsize - 1) / page_wsize * page_wsize;
   return s;
 }
 

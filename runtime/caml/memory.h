@@ -60,6 +60,7 @@ CAMLextern value caml_check_urgent_gc (value);
 CAMLextern color_t caml_allocation_color (void *hp);
 #ifdef CAML_INTERNALS
 CAMLextern char *caml_alloc_for_heap (asize_t request);   /* Size in bytes. */
+CAMLextern char *caml_alloc_for_minor_heap(asize_t request);
 CAMLextern void caml_free_for_heap (char *mem);
 CAMLextern int caml_add_to_heap (char *mem);
 #endif /* CAML_INTERNALS */
@@ -190,8 +191,6 @@ extern uintnat caml_use_huge_pages;
 #ifdef HAS_HUGE_PAGES
 #include <sys/mman.h>
 #define Heap_page_size HUGE_PAGE_SIZE
-#define Round_mmap_size(x)                                      \
-    (((x) + (Heap_page_size - 1)) & ~ (Heap_page_size - 1))
 #endif
 
 

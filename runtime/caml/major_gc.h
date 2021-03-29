@@ -30,7 +30,8 @@ typedef struct {
 } mark_entry;
 
 typedef struct {
-  void *block;           /* address of the malloced block this chunk lives in */
+  void *block;           /* address of the reserved block this chunk lives in */
+  asize_t block_size;    /* length of the reserved block */
   asize_t alloc;         /* in bytes, used for compaction */
   asize_t size;          /* in bytes */
   char *next;
@@ -43,6 +44,7 @@ typedef struct {
 #define Chunk_alloc(c) Chunk_head(c)->alloc
 #define Chunk_next(c) Chunk_head(c)->next
 #define Chunk_block(c) Chunk_head(c)->block
+#define Chunk_block_size(c) Chunk_head(c)->block_size
 
 extern int caml_gc_phase;
 extern int caml_gc_subphase;
