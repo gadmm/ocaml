@@ -583,15 +583,10 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   struct mark_stack stk = *Caml_state->mark_stack;
 
   uintnat young_start = (uintnat)Caml_state->young_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
+  uintnat half_young_len = ((uintnat)Caml_state->young_end
+                            - (uintnat)Caml_state->young_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
-  //#define Is_major_block(v) (Is_block(v) && !Is_young(v))
-#else
-#define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
-#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -599,7 +594,13 @@ CAMLnoinline static intnat do_some_marking(intnat work)
     if (pb_enqueued > pb_dequeued + min_pb) {
       /* Dequeue from prefetch buffer */
       value block = pb[(pb_dequeued++) & Pb_mask];
-      header_t hd = Hd_val(block);
+      header_t hd;
+
+#ifndef NO_NAKED_POINTERS
+      if (!Is_in_heap(block)) continue;
+#endif
+
+      hd = Hd_val(block);
 
       /* FIXME: Forward_tag */
       if (Tag_hd(hd) == Forward_tag) {
@@ -659,10 +660,13 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     for (; scan < scan_end; scan++) {
       value v = *scan;
-      if (Is_major_block(v)) {
+      if (Is_block_and_not_young(v)) {
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
         }
+#ifndef NO_NAKED_POINTERS
+        caml_page_table_prefetch((void *)v);
+#endif
         caml_prefetch(Hp_val(v));
         caml_prefetch(&Field(v, Queue_prefetch_distance - 1));
         pb[(pb_enqueued++) & Pb_mask] = v;

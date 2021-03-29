@@ -96,10 +96,55 @@
 #define In_young 2
 #define In_static_data 4
 
+#define Page(p) ((uintnat) (p) >> Page_log)
+#define Page_mask ((~(uintnat)0) << Page_log)
+
 #ifdef ARCH_SIXTYFOUR
 
+/* 64-bit implementation:
+   The page table is represented sparsely as a hash table
+   with linear probing */
+
+struct page_table {
+  mlsize_t size;                /* size == 1 << (wordsize - shift) */
+  int shift;
+  mlsize_t mask;                /* mask == size - 1 */
+  mlsize_t occupancy;
+  uintnat * entries;            /* [size]  */
+};
+
+extern struct page_table caml_page_table;
+
+/* Page table entries are the logical 'or' of
+   - the key: address of a page (low Page_log bits = 0)
+   - the data: a 8-bit integer */
+
+#define Page_entry_matches(entry,addr) \
+  ((((entry) ^ (addr)) & Page_mask) == 0)
+
+/* Multiplicative Fibonacci hashing
+   (Knuth, TAOCP vol 3, section 6.4, page 518).
+   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
+#define CAML_HASH_FACTOR 11400714819323198486UL
+#define Caml_Hash(v) (((v) * CAML_HASH_FACTOR) >> caml_page_table.shift)
+
+uintnat caml_page_table_proceed(void *addr, uintnat *i);
+
 /* 64 bits: Represent page table as a sparse hash table */
-int caml_page_table_lookup(void * addr);
+inline void caml_page_table_prefetch(void *addr)
+{
+  return caml_prefetch(&caml_page_table.entries[Caml_Hash(Page(addr))]);
+}
+
+inline uintnat caml_page_table_lookup(void *addr)
+{
+  uintnat *i = &caml_page_table.entries[Caml_Hash(Page(addr))];
+  uintnat e = *i;
+  /* The first hit is almost always successful, so optimize for this case */
+  if (Page_entry_matches(e, (uintnat)addr)) return e;
+  return caml_page_table_proceed(addr, i);
+}
+
 #define Classify_addr(a) (caml_page_table_lookup((void *)(a)))
 
 #else
