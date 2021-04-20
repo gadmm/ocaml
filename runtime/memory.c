@@ -55,7 +55,7 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 struct page_table caml_page_table;
 
-int caml_page_table_proceed(uintnat addr, uintnat *i)
+uintnat caml_page_table_proceed(uintnat addr, uintnat *i)
 {
   uintnat *end = caml_page_table.entries + caml_page_table.size;
   uintnat e = *i;

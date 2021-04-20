@@ -70,6 +70,8 @@
    (char *)(val) < (char *)Caml_state_field(young_end) && \
    (char *)(val) > (char *)Caml_state_field(young_start))
 
+#define Is_in_heap(a) (Classify_addr(a) & In_heap)
+
 #ifdef NO_NAKED_POINTERS
 
 #define Is_in_heap_or_young(a) 1
@@ -128,26 +130,37 @@ extern struct page_table caml_page_table;
    (Knuth, TAOCP vol 3, section 6.4, page 518).
    HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
 #define CAML_HASH_FACTOR 11400714819323198486UL
-#define Caml_Hash(v) (((v) * CAML_HASH_FACTOR) >> caml_page_table.shift)
+#define Caml_Hash_shift(v,shift) (((v) * CAML_HASH_FACTOR) >> shift)
+#define Caml_Hash(v) (Caml_Hash_shift(v,caml_page_table.shift))
+#define Caml_page_table_addr(addr, entries, shift)  \
+  entries + Caml_Hash_shift(Page(addr), shift)
 
 /* 64 bits: Represent page table as a sparse hash table */
+inline uintnat * caml_page_table_prefetch(void *addr, uintnat *entries,
+                                          int shift)
+{
+  uintnat p = Large_page_mask(addr);
+  uintnat *i = Caml_page_table_addr(p, entries, shift);
+  caml_prefetch(i);
+  return i;
+}
+
 int caml_page_table_lookup(void *addr);
 
 #define Classify_addr(a) (caml_page_table_lookup((void *)a))
 
-int caml_page_table_proceed(uintnat addr, uintnat *i);
+uintnat caml_page_table_proceed(uintnat addr, uintnat *i);
 
-inline uintnat caml_page_table_in_heap(void *addr)
+inline int caml_page_table_in_heap(void *addr, uintnat *i,
+                                   uintnat *entries, int shift)
 {
   uintnat p = Large_page_mask(addr);
-  uintnat *i = &caml_page_table.entries[Caml_Hash(Page(p))];
   uintnat e = *i;
   /* The first hit is almost always successful, so optimize for this case */
-  if (LIKELY(Page_entry_matches(e,p))) return e;
-  return caml_page_table_proceed(p, i);
+  if (UNLIKELY(!Page_entry_matches(e,p)))
+    e = caml_page_table_proceed(p, i);
+  return e & In_heap;
 }
-
-#define Is_in_heap(a) (LIKELY(caml_page_table_in_heap((void *)a) & In_heap))
 
 #else
 
