@@ -30,7 +30,7 @@ typedef struct {
 } mark_entry;
 
 typedef struct {
-  void *block;           /* address of the malloced block this chunk lives in */
+  void *block;           /* address of the reserved block this chunk lives in */
   asize_t allocated;     /* in bytes, used for compaction */
   asize_t size;          /* in bytes */
   char *next;

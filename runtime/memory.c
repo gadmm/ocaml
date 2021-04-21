@@ -19,12 +19,13 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include "caml/address_class.h"
 #include "caml/config.h"
 #include "caml/fail.h"
 #include "caml/freelist.h"
 #include "caml/gc.h"
 #include "caml/gc_ctrl.h"
+#include "caml/heap_allocator.h"
+#include "caml/heap_map.h"
 #include "caml/major_gc.h"
 #include "caml/memory.h"
 #include "caml/major_gc.h"
@@ -245,51 +246,27 @@ int caml_page_table_remove(int kind, void * start, void * end)
 */
 char *caml_alloc_for_heap (asize_t request)
 {
-  char *mem;
-  if (caml_use_huge_pages){
-#ifndef HAS_HUGE_PAGES
+  char *mem, *block;
+  asize_t committed;
+  request += sizeof(heap_chunk_head);
+  if (!caml_heap_commit(request, &block, &committed))
     return NULL;
-#else
-    uintnat size = Round_mmap_size (sizeof (heap_chunk_head) + request);
-    void *block;
-    block = mmap (NULL, size, PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
-    if (block == MAP_FAILED) return NULL;
-    mem = (char *) block + sizeof (heap_chunk_head);
-    Chunk_size (mem) = size - sizeof (heap_chunk_head);
-    Chunk_block (mem) = block;
-#endif
-  }else{
-    void *block;
-
-    request = ((request + Page_size - 1) >> Page_log) << Page_log;
-    mem = caml_stat_alloc_aligned_noexc (request + sizeof (heap_chunk_head),
-                                         sizeof (heap_chunk_head), &block);
-    if (mem == NULL) return NULL;
-    mem += sizeof (heap_chunk_head);
-    Chunk_size (mem) = request;
-    Chunk_block (mem) = block;
-  }
+  mem = block + sizeof(heap_chunk_head);
+  Chunk_size(mem) = committed - sizeof(heap_chunk_head);
+  Chunk_block(mem) = block;
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_first.end = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_end = (value*)mem;
   return mem;
 }
 
-/* Use this function to free a block allocated with [caml_alloc_for_heap]
-   if you don't add it with [caml_add_to_heap].
+/* Use this function to free a block allocated with
+   [caml_alloc_for_heap] if you don't add it with [caml_add_to_heap].
 */
 void caml_free_for_heap (char *mem)
 {
-  if (caml_use_huge_pages){
-#ifdef HAS_HUGE_PAGES
-    munmap (Chunk_block (mem), Chunk_size (mem) + sizeof (heap_chunk_head));
-#else
-    CAMLassert (0);
-#endif
-  }else{
-    caml_stat_free (Chunk_block (mem));
-  }
+  caml_heap_decommit(Chunk_block(mem),
+                     Chunk_size(mem) + sizeof(heap_chunk_head));
 }
 
 /* Take a chunk of memory as argument, which must be the result of a
@@ -299,11 +276,11 @@ void caml_free_for_heap (char *mem)
    some blocks are blue, they must be added to the free list by the
    caller.  All other blocks must have the color [caml_allocation_color(m)].
    The caller must update [caml_allocated_words] if applicable.
-   Return value: 0 if no error; -1 in case of error.
+   Return false in case of error.
 
    See also: caml_compact_heap, which duplicates most of this function.
 */
-int caml_add_to_heap (char *m)
+bool caml_add_to_heap (char *m)
 {
 #ifdef DEBUG
   /* Should check the contents of the block. */
@@ -313,9 +290,9 @@ int caml_add_to_heap (char *m)
                    ARCH_INTNAT_PRINTF_FORMAT "uk bytes\n",
      (Bsize_wsize (Caml_state->stat_heap_wsz) + Chunk_size (m)) / 1024);
 
-  /* Register block in page table */
-  if (caml_page_table_add(In_heap, m, m + Chunk_size(m)) != 0)
-    return -1;
+  /* Register block in heap table */
+  if (!caml_heap_table_add(In_heap, m, m + Chunk_size(m)))
+    return false;
 
   /* Chain this heap chunk. */
   {
@@ -336,7 +313,7 @@ int caml_add_to_heap (char *m)
   if (Caml_state->stat_heap_wsz > Caml_state->stat_top_heap_wsz){
     Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
   }
-  return 0;
+  return true;
 }
 
 /* Allocate more memory from malloc for the heap.
@@ -390,7 +367,7 @@ static value *expand_heap (mlsize_t request)
     }
   }
   CAMLassert (Wosize_hp (mem) >= request);
-  if (caml_add_to_heap ((char *) mem) != 0){
+  if (!caml_add_to_heap((char *) mem)) {
     caml_free_for_heap ((char *) mem);
     return NULL;
   }
@@ -433,9 +410,6 @@ void caml_shrink_heap (char *chunk)
   cp = &caml_heap_start;
   while (*cp != chunk) cp = &(Chunk_next (*cp));
   *cp = Chunk_next (chunk);
-
-  /* Remove the pages of [chunk] from the page table. */
-  caml_page_table_remove(In_heap, chunk, chunk + Chunk_size (chunk));
 
   /* Free the [malloc] block that contains [chunk]. */
   caml_free_for_heap (chunk);

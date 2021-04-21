@@ -26,6 +26,7 @@
 #include "caml/freelist.h"
 #include "caml/gc.h"
 #include "caml/gc_ctrl.h"
+#include "caml/heap_map.h"
 #include "caml/major_gc.h"
 #include "caml/misc.h"
 #include "caml/mlvalues.h"
@@ -1196,10 +1197,14 @@ asize_t caml_clip_heap_chunk_wsz (asize_t wsz)
 {
   asize_t result = wsz;
   uintnat incr;
+  /* We count the header as part of the heap increment or heap chunk
+     minimum. This makes a difference since the granularity is coarse
+     (huge page size on most platforms). We need to round up. */
+  asize_t head_wsz = Wsize_bsize(sizeof(heap_chunk_head) + sizeof(value) - 1);
 
   /* Compute the heap increment as a word size. */
   if (caml_major_heap_increment > 1000){
-    incr = caml_major_heap_increment;
+    incr = caml_major_heap_increment - sizeof(heap_chunk_head);
   }else{
     incr = Caml_state->stat_heap_wsz / 100 * caml_major_heap_increment;
   }
@@ -1207,8 +1212,9 @@ asize_t caml_clip_heap_chunk_wsz (asize_t wsz)
   if (result < incr){
     result = incr;
   }
-  if (result < Heap_chunk_min){
-    result = Heap_chunk_min;
+  /* TODO: a bit ugly, find a better reorganization of the code */
+  if (result < Heap_chunk_min - head_wsz){
+    result = Heap_chunk_min - head_wsz;
   }
   return result;
 }
@@ -1218,23 +1224,21 @@ void caml_init_major_heap (asize_t heap_size)
 {
   int i;
 
-  Caml_state->stat_heap_wsz =
-    caml_clip_heap_chunk_wsz (Wsize_bsize (heap_size));
-  Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
-  CAMLassert (Bsize_wsize (Caml_state->stat_heap_wsz) % Page_size == 0);
+  heap_size =
+    Bsize_wsize (caml_clip_heap_chunk_wsz (Wsize_bsize (heap_size)));
   caml_heap_start =
-    (char *) caml_alloc_for_heap (Bsize_wsize (Caml_state->stat_heap_wsz));
+    (char *) caml_alloc_for_heap(heap_size);
   if (caml_heap_start == NULL)
     caml_fatal_error ("cannot allocate initial major heap");
+  heap_size = Chunk_size (caml_heap_start);
   Chunk_next (caml_heap_start) = NULL;
-  Caml_state->stat_heap_wsz = Wsize_bsize (Chunk_size (caml_heap_start));
+  Caml_state->stat_heap_wsz = Wsize_bsize (heap_size);
   Caml_state->stat_heap_chunks = 1;
   Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
 
-  if (caml_page_table_add(In_heap, caml_heap_start,
-        caml_heap_start + Bsize_wsize (Caml_state->stat_heap_wsz))
-      != 0) {
-    caml_fatal_error ("cannot allocate initial page table");
+  if (!caml_heap_table_add(In_heap, caml_heap_start,
+                           caml_heap_start + heap_size)) {
+    caml_fatal_error ("cannot allocate initial heap table");
   }
 
   caml_fl_init_merge ();
