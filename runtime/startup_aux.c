@@ -28,6 +28,8 @@
 #endif
 #include "caml/osdeps.h"
 #include "caml/startup_aux.h"
+#include "caml/heap_allocator.h"
+#include "caml/platform.h"
 
 
 #ifdef _WIN32
@@ -61,9 +63,9 @@ void caml_init_atom_table(void)
   for(i = 0; i < 256; i++) {
     caml_atom_table[i] = Make_header(0, i, Caml_black);
   }
-  if (caml_page_table_add(In_static_data,
-                          caml_atom_table, caml_atom_table + 256 + 1) != 0) {
-    caml_fatal_error("not enough memory for initial page table");
+  if (!caml_heap_table_add_static_data(caml_atom_table,
+                                       caml_atom_table + 256 + 1)) {
+    caml_fatal_error("not enough memory for initial heap table");
   }
 }
 
