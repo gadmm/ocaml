@@ -150,13 +150,7 @@ void caml_set_minor_heap_size (asize_t bsz)
   new_heap = caml_alloc_for_minor_heap(bsz);
   if (new_heap == NULL) caml_raise_out_of_memory();
   bsz = Chunk_size(new_heap);
-  if (caml_page_table_add(In_young, new_heap, new_heap + bsz) != 0) {
-    caml_free_for_heap(new_heap);
-    caml_raise_out_of_memory();
-  }
   if (Caml_state->young_alloc_start != NULL){
-    caml_page_table_remove(In_young, Caml_state->young_alloc_start,
-                           Caml_state->young_alloc_end);
     caml_free_for_heap((char *)Caml_state->young_alloc_start);
   }
   Caml_state->young_alloc_start = (value *) new_heap;

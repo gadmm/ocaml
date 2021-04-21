@@ -62,6 +62,8 @@
 #include "misc.h"
 #include "mlvalues.h"
 
+#include <limits.h>
+
 /* Use the following macros to test an address for the different classes
    it might belong to. */
 
@@ -70,7 +72,7 @@
    (char *)(val) < (char *)Caml_state_field(young_alloc_end) && \
    (char *)(val) > (char *)Caml_state_field(young_alloc_start))
 
-#define Is_in_heap(a) (Classify_addr(a) & In_heap)
+#define Is_in_heap(a) (caml_is_in_heap((void*)a))
 
 #ifdef NO_NAKED_POINTERS
 
@@ -79,59 +81,51 @@
 
 #else
 
-#define Is_in_heap_or_young(a) (Classify_addr(a) & (In_heap | In_young))
-
-#ifdef ARCH_SIXTYFOUR
-int caml_is_in_value_area(uintnat addr);
-#define Is_in_value_area(a) (caml_is_in_value_area((uintnat)a))
-#else
-#define Is_in_value_area(a)                                     \
-  (Classify_addr(a) & (In_heap | In_young | In_static_data))
-#endif /* ARCH_SIXTYFOUR */
+#define Is_in_heap_or_young(a) (Is_in_heap(a) || Is_young((value)a))
+#define Is_in_value_area(a) (caml_is_in_value_area((void *)a))
 
 #endif /* NO_NAKED_POINTERS */
 
 /***********************************************************************/
 /* The rest of this file is private and may change without notice. */
 
-/* Page table: 2-level bibop */
-
 #define In_heap 1
-#define In_young 2
-#define In_static_data 4
+#define In_static_data 2
+
+/* Page table: bitmap */
 
 #ifdef ARCH_SIXTYFOUR
 
 #define Pagetable_significant_bits 48
-#define Pagetable2_log 11
 #define Pagetable_page_log 28 // 256MB
 
 #else
 
 #define Pagetable_significant_bits 32
-#define Pagetable2_log 11
 #define Pagetable_page_log Page_log
 
 #endif /* ARCH_SIXTYFOUR */
 
-#define Page_mask ((~(uintnat)0) << Page_log)
 #define Pagetable_page_size ((uintnat)1 << Pagetable_page_log)
-#define Pagetable_page_mask ((~(uintnat)0) << Pagetable_page_log)
-#define Pagetable1_log (Pagetable_significant_bits  \
-                        - Pagetable2_log            \
-                        - Pagetable_page_log)
-#define Pagetable2_size (1 << Pagetable2_log)
-#define Pagetable1_size (1 << Pagetable1_log)
+#define Page_mask (~((uintnat)Page_size - 1))
+#define Large_page(p)                                                 \
+  (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
+   >> Pagetable_page_log)
+#define Pages_per_entry (sizeof(uintnat) * CHAR_BIT)
 
-#define Pagetable_index1(a)                                   \
-  ((((uintnat)(a)) >> (Pagetable_page_log + Pagetable2_log))  \
-   & (Pagetable1_size - 1))
-#define Pagetable_index2(a) \
-  ((((uintnat)(a)) >> Pagetable_page_log) & (Pagetable2_size - 1))
-#define Classify_addr(a) \
-  caml_page_table[Pagetable_index1(a)][Pagetable_index2(a)]
+CAMLextern uintnat *caml_heap_table;
 
-CAMLextern unsigned char * caml_page_table[Pagetable1_size];
+#define Get_bit(p)                                            \
+  (!!(caml_heap_table[p / Pages_per_entry] &                  \
+      (((uintnat)1) << (p % Pages_per_entry))))
+
+inline int caml_is_in_heap(void *addr)
+{
+  uintnat p = Large_page(addr);
+  return Get_bit(p);
+}
+
+int caml_is_in_value_area(void *addr);
 
 int caml_page_table_add(int kind, void * start, void * end);
 int caml_page_table_remove(int kind, void * start, void * end);
