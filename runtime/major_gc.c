@@ -656,8 +656,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       value v = *scan;
       if (Is_block_and_not_young(v)) {
 #ifndef NO_NAKED_POINTERS
-        if (!caml_page_table_in_heap((void *)v))
-            continue;
+        if (!Is_in_heap(v)) continue;
 #endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
