@@ -52,19 +52,17 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-#ifdef ARCH_SIXTYFOUR
-
+uintnat *caml_heap_table;
 static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
 
-int caml_is_in_value_area(uintnat addr)
+#define Pagetable_log (Pagetable_significant_bits - Pagetable_page_log) // 20
+#define Pagetable_size (((uintnat)1 << Pagetable_log) / Pages_per_entry)
+
+int caml_is_in_value_area(void *addr)
 {
-  unsigned char entry = Classify_addr(addr);
-  if (entry & (In_heap | In_young)) return 1;
-  if (entry & In_static_data) {
-    uintnat data;
-    return caml_skiplist_find(&static_area_sk, addr & Page_mask, &data);
-  }
-  return 0;
+  uintnat data;
+  if (Is_in_heap_or_young(addr)) return 1;
+  return caml_skiplist_find(&static_area_sk, (uintnat)addr & Page_mask, &data);
 }
 
 static void static_area_insert(void * start, void * end)
@@ -78,56 +76,49 @@ static void static_area_insert(void * start, void * end)
     caml_skiplist_insert(&static_area_sk, p, 0);
 }
 
-#else
-
-static void static_area_insert(void * start, void * end)
-{
-}
-
-#endif
-
-/* The page table is represented as a 2-level array of unsigned char */
-
-CAMLexport unsigned char * caml_page_table[Pagetable1_size];
-static unsigned char caml_page_table_empty[Pagetable2_size] = { 0, };
-
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-  int i;
-  for (i = 0; i < Pagetable1_size; i++)
-    caml_page_table[i] = caml_page_table_empty;
+  // 2^(Pagetable_log - Page_log - 3) = 32 pages that are
+  // zero-initialised and mapped to the zero page until modified
+  // (Linux).
+  void *block = mmap(NULL, Pagetable_size * sizeof(uintnat),
+                     PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (block == MAP_FAILED) return -1;
+  caml_heap_table = (uintnat *)block;
   return 0;
+  // todo: free on shutdown
 }
 
-static int caml_page_table_modify(uintnat page, int toclear, int toset)
+static void set_bit(uintnat p)
 {
-  uintnat i = Pagetable_index1(page);
-  uintnat j = Pagetable_index2(page);
-
-  if (caml_page_table[i] == caml_page_table_empty) {
-    unsigned char * new_tbl = caml_stat_calloc_noexc(Pagetable2_size, 1);
-    if (new_tbl == 0) return -1;
-    caml_page_table[i] = new_tbl;
-  }
-  caml_page_table[i][j] = (caml_page_table[i][j] & ~toclear) | toset;
-  return 0;
+  caml_heap_table[p / Pages_per_entry] |=
+    (((uintnat)1) << (p % Pages_per_entry));
 }
 
-static int page_table_modify_range(int toclear, int toset,
-                                   void * start, void * end)
+static void clear_bit(uintnat p)
 {
-  uintnat pstart = (uintnat) start & Pagetable_page_mask;
-  uintnat pend = ((uintnat) end - 1) & Pagetable_page_mask;
+  caml_heap_table[p / Pages_per_entry] &=
+    ~(((uintnat)1) << (p % Pages_per_entry));
+}
+
+static int page_table_modify_range(int val, void * start, void * end)
+{
+  uintnat pstart = Large_page(start);
+  uintnat pend = Large_page((uintnat)end - 1);
   uintnat p;
 
-  for (p = pstart; p <= pend; p += Pagetable_page_size)
-    if (caml_page_table_modify(p, toclear, toset) != 0) return -1;
+  for (p = pstart; p <= pend; p++) {
+    if (val) set_bit(p);
+    else clear_bit(p);
+  }
   return 0;
 }
 
 int caml_page_table_add(int kind, void * start, void * end)
 {
-  page_table_modify_range(0, kind, start, end);
+  if (kind == In_heap)
+    page_table_modify_range(1, start, end);
   if (kind == In_static_data)
     static_area_insert(start, end);
   return 0;
@@ -136,7 +127,7 @@ int caml_page_table_add(int kind, void * start, void * end)
 int caml_page_table_remove(int kind, void * start, void * end)
 {
   CAMLassert(kind != In_static_data);
-  page_table_modify_range(kind, 0, start, end);
+  page_table_modify_range(0, start, end);
   return 0;
 }
 
@@ -192,11 +183,6 @@ char *caml_alloc_for_heap (asize_t request)
        have a good location in the page table. */
     block = mmap(last_block, request_virtual, PROT_NONE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    /*  printf("hint: %p, %p, %lld, %p, %p\n", (void *)last_block,
-        (void *)block,
-        ((long long)last_block - (long long)block)/Pagetable_page_size,
-        (void *)reserve, (void *)request_virtual);
-    */
     if (block == MAP_FAILED) return NULL;
     mem = (char *) round_up((uintnat) block, Pagetable_page_size);
     CAMLassert((uintnat) mem + reserve <= (uintnat) block + request_virtual);
