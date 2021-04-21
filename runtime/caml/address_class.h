@@ -81,26 +81,73 @@
 
 #define Is_in_heap_or_young(a) (Classify_addr(a) & (In_heap | In_young))
 
-#define Is_in_value_area(a)                                     \
-  (Classify_addr(a) & (In_heap | In_young | In_static_data))
-
-#define Is_in_static_data(a) (Classify_addr(a) & In_static_data)
-
 #endif
 
 /***********************************************************************/
 /* The rest of this file is private and may change without notice. */
 
-#define Not_in_heap 0
 #define In_heap 1
 #define In_young 2
 #define In_static_data 4
 
+#define Page_mask ((~(uintnat)0) << Page_log)
+#define Large_page_log (Page_log + 10) // 21 <= Large_page_log
+#define Large_page_size ((uintnat) 1 << Large_page_log)
+
 #ifdef ARCH_SIXTYFOUR
 
+/* 64-bit implementation:
+   The page table is represented sparsely as a hash table
+   with linear probing */
+
+typedef unsigned int pt_entry;
+
+#define Large_page_shift (48 - 8 * sizeof(pt_entry))
+#define Large_page_mask ((~(pt_entry)0) << (Large_page_log - Large_page_shift))
+#define Large_page(p) \
+  (((pt_entry) ((uintnat) (p) >> Large_page_shift)) & Large_page_mask)
+
+struct page_table {
+  mlsize_t size;                /* size == 1 << (wordsize - shift) */
+  int shift;
+  mlsize_t mask;                /* mask == size - 1 */
+  mlsize_t occupancy;
+  pt_entry * entries;            /* [size]  */
+};
+
+extern struct page_table caml_page_table;
+
+/* Page table entries are of the form
+   0b kkkkkkkk kkkkkkkk kkkkkkkk kkkddddd
+   - k is the key: the most significant bits of the page address
+     seen as a 48-bit integer (Large_page_log lower bits set to 0).
+   - the data: a 5-bit integer */
+
+#define Page_entry_matches(entry,page) \
+  ((((entry) ^ (page)) & Large_page_mask) == 0)
+
+/* Multiplicative Fibonacci hashing
+   (Knuth, TAOCP vol 3, section 6.4, page 518).
+   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
+#define CAML_HASH_FACTOR 2654435769U
+#define Caml_Hash(v) \
+  ((((pt_entry)v) * CAML_HASH_FACTOR) >> caml_page_table.shift)
+
 /* 64 bits: Represent page table as a sparse hash table */
-int caml_page_table_lookup(void * addr);
-#define Classify_addr(a) (caml_page_table_lookup((void *)(a)))
+pt_entry caml_page_table_lookup(void *addr);
+
+#define Classify_addr(a) (caml_page_table_lookup((void *)a))
+
+inline int caml_page_table_in_heap(void *addr)
+{
+  pt_entry p = Large_page(addr);
+  return caml_page_table.entries[Caml_Hash(p)] == (p | In_heap);
+}
+
+#ifndef NO_NAKED_POINTERS
+pt_entry caml_is_in_value_area(void *addr);
+#define Is_in_value_area(a) (caml_is_in_value_area((void *)a))
+#endif
 
 #else
 

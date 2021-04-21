@@ -624,11 +624,6 @@ Caml_noinline static intnat do_some_marking
     ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
-#else
-  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
-#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -693,7 +688,11 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
-      if (Is_major_block(v)) {
+      if (Is_block_and_not_young(v)) {
+#ifndef NO_NAKED_POINTERS
+        if (!caml_page_table_in_heap((void *)v))
+            continue;
+#endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
