@@ -690,8 +690,7 @@ Caml_noinline static intnat do_some_marking
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
       if (Is_block_and_not_young(v)) {
 #ifndef NO_NAKED_POINTERS
-        if (!caml_page_table_in_heap((void *)v))
-            continue;
+        if (!Is_in_heap(v)) continue;
 #endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
