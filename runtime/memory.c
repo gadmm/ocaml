@@ -15,6 +15,7 @@
 
 #define CAML_INTERNALS
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -32,6 +33,7 @@
 #include "caml/misc.h"
 #include "caml/mlvalues.h"
 #include "caml/signals.h"
+#include "caml/skiplist.h"
 #include "caml/memprof.h"
 #include "caml/eventlog.h"
 
@@ -51,198 +53,137 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-#define Page(p) ((uintnat) (p) >> Page_log)
-#define Page_mask ((~(uintnat)0) << Page_log)
+char *caml_heap_table;
+static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
 
-#ifdef ARCH_SIXTYFOUR
+#define Pagetable_log (Pagetable_significant_bits - Pagetable_page_log) // 20
+#define Pagetable_size (((uintnat)1 << Pagetable_log))
 
-/* 64-bit implementation:
-   The page table is represented sparsely as a hash table
-   with linear probing */
-
-struct page_table {
-  mlsize_t size;                /* size == 1 << (wordsize - shift) */
-  int shift;
-  mlsize_t mask;                /* mask == size - 1 */
-  mlsize_t occupancy;
-  uintnat * entries;            /* [size]  */
-};
-
-static struct page_table caml_page_table;
-
-/* Page table entries are the logical 'or' of
-   - the key: address of a page (low Page_log bits = 0)
-   - the data: a 8-bit integer */
-
-#define Page_entry_matches(entry,addr) \
-  ((((entry) ^ (addr)) & Page_mask) == 0)
-
-/* Multiplicative Fibonacci hashing
-   (Knuth, TAOCP vol 3, section 6.4, page 518).
-   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
-#ifdef ARCH_SIXTYFOUR
-#define HASH_FACTOR 11400714819323198486UL
-#else
-#define HASH_FACTOR 2654435769UL
-#endif
-#define Hash(v) (((v) * HASH_FACTOR) >> caml_page_table.shift)
-
-int caml_page_table_lookup(void * addr)
+int caml_is_in_static_data(void *addr)
 {
-  uintnat h, e;
-
-  h = Hash(Page(addr));
-  /* The first hit is almost always successful, so optimize for this case */
-  e = caml_page_table.entries[h];
-  if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
-  while(1) {
-    if (e == 0) return 0;
-    h = (h + 1) & caml_page_table.mask;
-    e = caml_page_table.entries[h];
-    if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
-  }
+  uintnat data;
+  return caml_skiplist_find(&static_area_sk,
+                            (uintnat)addr & Page_mask,
+                            &data);
 }
 
-int caml_page_table_initialize(mlsize_t bytesize)
-{
-  uintnat pagesize = Page(bytesize);
-
-  caml_page_table.size = 1;
-  caml_page_table.shift = 8 * sizeof(uintnat);
-  /* Aim for initial load factor between 1/4 and 1/2 */
-  while (caml_page_table.size < 2 * pagesize) {
-    caml_page_table.size <<= 1;
-    caml_page_table.shift -= 1;
-  }
-  caml_page_table.mask = caml_page_table.size - 1;
-  caml_page_table.occupancy = 0;
-  caml_page_table.entries =
-    caml_stat_calloc_noexc(caml_page_table.size, sizeof(uintnat));
-  if (caml_page_table.entries == NULL)
-    return -1;
-  else
-    return 0;
-}
-
-static int caml_page_table_resize(void)
-{
-  struct page_table old = caml_page_table;
-  uintnat * new_entries;
-  uintnat i, h;
-
-  caml_gc_message (0x08, "Growing page table to %"
-                   ARCH_INTNAT_PRINTF_FORMAT "u entries\n",
-                   caml_page_table.size);
-
-  new_entries = caml_stat_calloc_noexc(2 * old.size, sizeof(uintnat));
-  if (new_entries == NULL) {
-    caml_gc_message (0x08, "No room for growing page table\n");
-    return -1;
-  }
-
-  caml_page_table.size = 2 * old.size;
-  caml_page_table.shift = old.shift - 1;
-  caml_page_table.mask = caml_page_table.size - 1;
-  caml_page_table.occupancy = old.occupancy;
-  caml_page_table.entries = new_entries;
-
-  for (i = 0; i < old.size; i++) {
-    uintnat e = old.entries[i];
-    if (e == 0) continue;
-    h = Hash(Page(e));
-    while (caml_page_table.entries[h] != 0)
-      h = (h + 1) & caml_page_table.mask;
-    caml_page_table.entries[h] = e;
-  }
-
-  caml_stat_free(old.entries);
-  return 0;
-}
-
-static int caml_page_table_modify(uintnat page, int toclear, int toset)
-{
-  uintnat h;
-
-  CAMLassert ((page & ~Page_mask) == 0);
-
-  /* Resize to keep load factor below 1/2 */
-  if (caml_page_table.occupancy * 2 >= caml_page_table.size) {
-    if (caml_page_table_resize() != 0) return -1;
-  }
-  h = Hash(Page(page));
-  while (1) {
-    if (caml_page_table.entries[h] == 0) {
-      caml_page_table.entries[h] = page | toset;
-      caml_page_table.occupancy++;
-      break;
-    }
-    if (Page_entry_matches(caml_page_table.entries[h], page)) {
-      caml_page_table.entries[h] =
-        (caml_page_table.entries[h] & ~toclear) | toset;
-      break;
-    }
-    h = (h + 1) & caml_page_table.mask;
-  }
-  return 0;
-}
-
-#else
-
-/* 32-bit implementation:
-   The page table is represented as a 2-level array of unsigned char */
-
-CAMLexport unsigned char * caml_page_table[Pagetable1_size];
-static unsigned char caml_page_table_empty[Pagetable2_size] = { 0, };
-
-int caml_page_table_initialize(mlsize_t bytesize)
-{
-  int i;
-  for (i = 0; i < Pagetable1_size; i++)
-    caml_page_table[i] = caml_page_table_empty;
-  return 0;
-}
-
-static int caml_page_table_modify(uintnat page, int toclear, int toset)
-{
-  uintnat i = Pagetable_index1(page);
-  uintnat j = Pagetable_index2(page);
-
-  if (caml_page_table[i] == caml_page_table_empty) {
-    unsigned char * new_tbl = caml_stat_calloc_noexc(Pagetable2_size, 1);
-    if (new_tbl == 0) return -1;
-    caml_page_table[i] = new_tbl;
-  }
-  caml_page_table[i][j] = (caml_page_table[i][j] & ~toclear) | toset;
-  return 0;
-}
-
-#endif
-
-int caml_page_table_add(int kind, void * start, void * end)
+static void static_area_insert(void * start, void * end)
 {
   uintnat pstart = (uintnat) start & Page_mask;
   uintnat pend = ((uintnat) end - 1) & Page_mask;
   uintnat p;
-
+  // Lots of optimisation opportunities (just record the beginning and
+  // end of the whole segment, record ranges of pages...)
   for (p = pstart; p <= pend; p += Page_size)
-    if (caml_page_table_modify(p, 0, kind) != 0) return -1;
-  return 0;
+    caml_skiplist_insert(&static_area_sk, p, 0);
 }
 
-int caml_page_table_remove(int kind, void * start, void * end)
-{
-  uintnat pstart = (uintnat) start & Page_mask;
-  uintnat pend = ((uintnat) end - 1) & Page_mask;
-  uintnat p;
+// TODO: better portability of on-demand paging
+#if (defined(NATIVE_CODE) && defined(HAS_STACK_OVERFLOW_DETECTION))
+#define PAGE_TABLE_ON_DEMAND 1
+#else
+#define PAGE_TABLE_ON_DEMAND 0
+#endif
 
-  for (p = pstart; p <= pend; p += Page_size)
-    if (caml_page_table_modify(p, kind, 0) != 0) return -1;
+int caml_page_table_initialize(mlsize_t bytesize)
+{
+#if PAGE_TABLE_ON_DEMAND
+  // 2^(Pagetable_log - Page_log) = 1MB paged on demand.
+  int prot = PROT_NONE;
+#else
+  // 2^(Pagetable_log - Page_log) = 1MB initially mapped to the zero
+  // page and:
+  // - paged on demand if overcommitting is enabled on Linux,
+  // - committed up-front otherwise.
+  // todo: do better.
+  int prot = PROT_READ | PROT_WRITE;
+#endif
+  void *block = mmap(NULL, Pagetable_size, prot,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (block == MAP_FAILED) return -1;
+  caml_heap_table = (char *)block;
   return 0;
+  // todo: free on shutdown
 }
 
 static uintnat round_up(uintnat n, uintnat mod)
 {
   return (n + mod - 1) / mod * mod;
+}
+
+/* This is called infrequently, and for a small portion of
+   caml_heap_table, thanks to the hints given to mmap inside
+   [caml_alloc_for_heap] which tends to reserve heap inside
+   already-committed pages of caml_heap_table. */
+static int page_table_commit(uintnat start, uintnat end)
+{
+  int ret = 0;
+#if PAGE_TABLE_ON_DEMAND
+  // fixme: use sysconf(_SC_PAGESIZE) instead of Page_log
+  uintnat page_start = start & Page_mask;
+  uintnat size = round_up(end - page_start, Page_size);
+  CAMLassert(page_start + size <= Pagetable_size);
+  ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
+  CAMLassert(ret != -1 || errno == ENOMEM);
+#endif
+  return ret;
+}
+
+/* Function called from a signal handler. It must be
+   async-signal-safe. Returns 1 if the fault is due to a naked pointer
+   caught for the first time inside the address space described by
+   this caml_heap_table page. Returns 0 if the fault is unrelated.
+   Happens less than 255 times over the execution of a program.
+*/
+int caml_page_table_fault(void *addr)
+{
+  uintnat p = (uintnat)addr;
+  // Allocate a page of the heap table.
+  if (p < (uintnat)caml_heap_table ||
+      p >= (uintnat)caml_heap_table + Pagetable_size)
+    return 0;
+  if (-1 == page_table_commit(p, p + 1)) {
+    // We assume that this call is safe because the fault was caused
+    // in places in the runtime that are safe (for functions like
+    // malloc, printf..) and the program execution will end
+    // immediately afterwards.
+    caml_fatal_error("out of memory");
+  }
+  return 1;
+}
+
+int caml_page_table_add(int kind, void * start, void * end)
+{
+  uintnat pstart = Large_page(start);
+  uintnat pend = Large_page((uintnat)end - 1) + 1;
+  uintnat p;
+  if (-1 == page_table_commit(pstart, pend)) return -1;
+  for (p = pstart; p < pend; p++) {
+    char e = 0;
+    if (!__atomic_compare_exchange_n(&caml_heap_table[p], &e,
+                                     kind, 0,
+                                     __ATOMIC_ACQ_REL,
+                                     __ATOMIC_ACQUIRE))
+      // It is a programming error to:
+      // - Let foreign pointers be seen by the OCaml GC
+      // - Release the underlying mapping of these pointers, so that
+      //   the same virtual space can later be acquired by the runtime.
+      // However we could be more lenient and find someplace else.
+      // This is not a safety measure (there is no guarantee that the
+      // GC had the time to see all the naked pointers). What needs to
+      // be ensured is only that the heap table is monotonic.
+      return -(e != kind);
+  }
+  return 0;
+}
+
+int caml_page_table_add_static_data(void * start, void * end)
+{
+  if (-1 == caml_page_table_add(Unmanaged, start, end))
+    return -1;
+  // todo: error handling?
+  static_area_insert(start, end);
+  return 0;
 }
 
 /* Allocate a block of the requested size, to be passed to
@@ -256,6 +197,7 @@ static uintnat round_up(uintnat n, uintnat mod)
 */
 char *caml_alloc_for_heap (asize_t request)
 {
+  static void *last_block = NULL;
   char *mem;
   asize_t request_virtual;
   char *block;
@@ -264,10 +206,12 @@ char *caml_alloc_for_heap (asize_t request)
     return NULL;
 #else
     uintnat size = round_up(request + sizeof(heap_chunk_head), Heap_page_size);
+    CAMLassert(Heap_page_size >= Pagetable_page_size); // TODO: always false
     block = mmap (NULL, size, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
     if (block == MAP_FAILED) return NULL;
     mem = block + sizeof (heap_chunk_head);
+    CAMLassert( ((uintnat) block & (Heap_page_size - 1)) == 0 );
     Chunk_size (mem) = size - sizeof (heap_chunk_head);
     Chunk_block (mem) = block;
 #endif
@@ -280,16 +224,23 @@ char *caml_alloc_for_heap (asize_t request)
 #else
     int huge_pages = 0;
 #endif
-    uintnat large_page_size = huge_pages ? Heap_page_size : Page_size;
+    uintnat page_size = huge_pages ? Heap_page_size : Page_size;
     request = request + sizeof(heap_chunk_head);
-    request = round_up(request, large_page_size);
-    request_virtual = request + large_page_size;
-    block = mmap(NULL, request_virtual, PROT_NONE,
+    request = round_up(request, page_size);
+    reserve = round_up(request, Pagetable_page_size);
+    request_virtual = reserve + Pagetable_page_size;
+    /* hint at reserving near the previous block to
+       have a good location in the page table. */
+    block = mmap(last_block, request_virtual, PROT_NONE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (block == MAP_FAILED) return NULL;
-    mem = (char *) round_up((uintnat) block, large_page_size);
-    reserve = round_up(request, large_page_size);
+    mem = (char *) round_up((uintnat) block, Pagetable_page_size);
     CAMLassert((uintnat) mem + reserve <= (uintnat) block + request_virtual);
+    /* free beginning */
+    munmap(block, mem - block);
+    /* free end */
+    munmap(mem + reserve, request_virtual - (mem - block) - reserve);
+    /* [mem..mem+reserve[ is reserved */
 #ifdef HAS_HUGE_PAGES
     /* Request huge pages (THP), always. Note: this can cause large
        pauses if /sys/kernel/mm/transparent_hugepage/defrag is set to
@@ -304,16 +255,12 @@ char *caml_alloc_for_heap (asize_t request)
 #endif
     /* Commit [mem..mem+request[ */
     if (mprotect(mem, request, PROT_READ | PROT_WRITE) == -1) goto err;
-    /* free beginning */
-    munmap(block, mem - block);
-    /* free end */
-    munmap(mem + reserve, request_virtual - (mem - block) - reserve);
-    /* [mem..mem+reserve[ is reserved */
     block = mem;
     mem += sizeof(heap_chunk_head);
     Chunk_size(mem) = request - sizeof(heap_chunk_head);
     Chunk_block(mem) = block;
     Chunk_block_size(mem) = reserve;
+    last_block = block;
   }
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_first.end = (value*)(mem + Chunk_size(mem));
@@ -345,7 +292,9 @@ void caml_free_for_heap (char *mem)
     CAMLassert (0);
 #endif
   }else{
-    munmap(Chunk_block(mem), Chunk_block_size(mem));
+    // Keep reserved (monotonicity of the heap table).
+    mprotect(Chunk_block(mem), Chunk_block_size(mem), PROT_NONE);
+    // todo: re-use reserved mappings.
   }
 }
 
@@ -490,9 +439,6 @@ void caml_shrink_heap (char *chunk)
   cp = &caml_heap_start;
   while (*cp != chunk) cp = &(Chunk_next (*cp));
   *cp = Chunk_next (chunk);
-
-  /* Remove the pages of [chunk] from the page table. */
-  caml_page_table_remove(In_heap, chunk, chunk + Chunk_size (chunk));
 
   /* Free the [malloc] block that contains [chunk]. */
   caml_free_for_heap (chunk);
