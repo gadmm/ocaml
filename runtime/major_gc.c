@@ -609,10 +609,12 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
+#ifdef NO_NAKED_POINTERS
 Caml_inline uintnat rotate1(uintnat x)
 {
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
+#endif
 
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
@@ -629,15 +631,12 @@ Caml_noinline static intnat do_some_marking
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
 
+#ifdef NO_NAKED_POINTERS
   uintnat young_start = (uintnat)Caml_state->young_alloc_start;
   uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
                             - (uintnat)Caml_state->young_alloc_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) >= (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
-#else
-  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
 #endif
 
 #ifdef CAML_INSTR
@@ -713,7 +712,11 @@ Caml_noinline static intnat do_some_marking
 #ifdef CAML_INSTR
       slice_fields ++;
 #endif
-      if (Is_major_block(v)) {
+#ifdef NO_NAKED_POINTERS
+      if (Is_block_and_not_young(v)) {
+#else
+      if (Is_block(v) && Is_in_heap(v)) {
+#endif
 #ifdef CAML_INSTR
         slice_pointers ++;
 #endif

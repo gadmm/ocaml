@@ -70,7 +70,7 @@
    (char *)(val) < (char *)Caml_state_field(young_alloc_end) && \
    (char *)(val) > (char *)Caml_state_field(young_alloc_start))
 
-#define Is_in_heap(a) (Classify_addr(a) & In_heap)
+#define Is_in_heap(a) (caml_classify_address((void*)a, In_heap))
 
 #ifdef NO_NAKED_POINTERS
 
@@ -79,48 +79,88 @@
 
 #else
 
-#define Is_in_heap_or_young(a) (Classify_addr(a) & (In_heap | In_young))
+#define Is_in_heap_or_young(a) \
+  (caml_classify_address((void*)a, In_heap | In_young))
 
-#define Is_in_value_area(a)                                     \
-  (Classify_addr(a) & (In_heap | In_young | In_static_data))
+#define Is_in_value_area(a) (caml_is_in_value_area((void *)a))
 
-#define Is_in_static_data(a) (Classify_addr(a) & In_static_data)
-
-#endif
+#endif /* NO_NAKED_POINTERS */
 
 /***********************************************************************/
 /* The rest of this file is private and may change without notice. */
 
-#define Not_in_heap 0
 #define In_heap 1
 #define In_young 2
-#define In_static_data 4
+#define Unmanaged 4
+
+/* Page table: bitmap */
 
 #ifdef ARCH_SIXTYFOUR
 
-/* 64 bits: Represent page table as a sparse hash table */
-int caml_page_table_lookup(void * addr);
-#define Classify_addr(a) (caml_page_table_lookup((void *)(a)))
+#define Pagetable_significant_bits 48
+#define Pagetable_page_log 28 // 256MB
 
 #else
 
-/* 32 bits: Represent page table as a 2-level array */
-#define Pagetable2_log 11
-#define Pagetable2_size (1 << Pagetable2_log)
-#define Pagetable1_log (Page_log + Pagetable2_log)
-#define Pagetable1_size (1 << (32 - Pagetable1_log))
-CAMLextern unsigned char * caml_page_table[Pagetable1_size];
+#define Pagetable_significant_bits 32
+#define Pagetable_page_log Page_log
 
-#define Pagetable_index1(a) (((uintnat)(a)) >> Pagetable1_log)
-#define Pagetable_index2(a) \
-  ((((uintnat)(a)) >> Page_log) & (Pagetable2_size - 1))
-#define Classify_addr(a) \
-  caml_page_table[Pagetable_index1(a)][Pagetable_index2(a)]
+#endif /* ARCH_SIXTYFOUR */
 
-#endif
+#define Pagetable_page_size ((uintnat)1 << Pagetable_page_log)
+#define Page_mask (~((uintnat)Page_size - 1))
+#define Large_page(p)                                                 \
+  (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
+   >> Pagetable_page_log)
+
+CAMLextern char *caml_heap_table;
+
+int caml_is_in_static_data(void *a);
+
+inline int caml_classify_address(void *a, int kind)
+{
+  uintnat p = Large_page(a);
+  char e = caml_heap_table[p];
+  // char e = __atomic_load_n(&caml_heap_table[p], __ATOMIC_RELAXED);
+  CAMLassert(kind != 0);
+  if (e & kind) {
+    /* no synchronisation required */
+    return 1;
+  }
+  if (LIKELY(e != 0)) {
+    /* no synchronisation required */
+    return 0;
+  }
+  // e == 0
+  /* This measures the cost of synchronisation in multicore: the
+     current branch occurs infrequently-enough (at most once per
+     visited heap table entry per domain, by monotonicity of the page
+     table) that the cost of the atomic operation itself would be
+     negligible. But we also have to count code layout, branch
+     mispredictions, etc. which could affect performance. We can
+     already measure these and see that their effect is negligible if
+     any. */
+  if (__atomic_compare_exchange_n(&caml_heap_table[p], &e,
+                                  Unmanaged, 0,
+                                  __ATOMIC_ACQ_REL,
+                                  __ATOMIC_ACQUIRE)) {
+    return Unmanaged & kind;
+  } else {
+    // e != 0
+    return e & kind;
+  }
+}
+
+inline int caml_is_in_value_area(void *a)
+{
+  if (Is_in_heap_or_young(a)) return 1;
+  return caml_is_in_static_data(a);
+}
+
+int caml_page_table_fault(void *addr);
 
 int caml_page_table_add(int kind, void * start, void * end);
-int caml_page_table_remove(int kind, void * start, void * end);
+int caml_page_table_add_static_data(void * start, void * end);
 int caml_page_table_initialize(mlsize_t bytesize);
 
 #endif /* CAML_ADDRESS_CLASS_H */
