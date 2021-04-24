@@ -131,13 +131,13 @@ value caml_startup_common(char_os **argv, int pooling)
 #endif
   caml_init_custom_operations();
   Caml_state->top_of_stack = &tos;
+  caml_init_signals();
   caml_init_gc (caml_init_minor_heap_wsz, caml_init_heap_wsz,
                 caml_init_heap_chunk_sz, caml_init_percent_free,
                 caml_init_max_percent_free, caml_init_major_window,
                 caml_init_custom_major_ratio, caml_init_custom_minor_ratio,
                 caml_init_custom_minor_max_bsz);
   init_static();
-  caml_init_signals();
 #ifdef _WIN32
   caml_win32_overflow_detection();
 #endif

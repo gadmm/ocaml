@@ -198,13 +198,14 @@ CAMLno_asan
 DECLARE_SIGNAL_HANDLER(segv_handler)
 {
   struct sigaction act;
-  char * fault_addr;
+  char * fault_addr = CONTEXT_FAULTING_ADDRESS;
+
+  if (caml_page_table_fault(fault_addr)) return;
 
   /* Sanity checks:
      - faulting address is word-aligned
      - faulting address is on the stack, or within EXTRA_STACK of it
      - we are in OCaml code */
-  fault_addr = CONTEXT_FAULTING_ADDRESS;
   if (((uintnat) fault_addr & (sizeof(intnat) - 1)) == 0
       && fault_addr < Caml_state->top_of_stack
       && (uintnat)fault_addr >= CONTEXT_SP - EXTRA_STACK
