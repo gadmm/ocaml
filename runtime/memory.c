@@ -15,6 +15,7 @@
 
 #define CAML_INTERNALS
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -52,17 +53,23 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-uintnat *caml_heap_table;
+char *caml_heap_table;
 static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
 
 #define Pagetable_log (Pagetable_significant_bits - Pagetable_page_log) // 20
-#define Pagetable_size (((uintnat)1 << Pagetable_log) / Pages_per_entry)
+#define Pagetable_size (((uintnat)1 << Pagetable_log))
 
 int caml_is_in_value_area(void *addr)
 {
   uintnat data;
-  if (Is_in_heap_or_young(addr)) return 1;
-  return caml_skiplist_find(&static_area_sk, (uintnat)addr & Page_mask, &data);
+  char e = Classify_addr(addr);
+  if (e & (In_young | In_heap)) return 1;
+  if (e & In_static_data) {
+    return caml_skiplist_find(&static_area_sk,
+                              (uintnat)addr & Page_mask,
+                              &data);
+  }
+  return 0;
 }
 
 static void static_area_insert(void * start, void * end)
@@ -78,47 +85,65 @@ static void static_area_insert(void * start, void * end)
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-  // 2^(Pagetable_log - Page_log - 3) = 32 pages that are
-  // zero-initialised and mapped to the zero page until modified
-  // (Linux).
-  void *block = mmap(NULL, Pagetable_size * sizeof(uintnat),
-                     PROT_READ | PROT_WRITE,
+#if defined(NATIVE_CODE) && defined(HAS_STACK_OVERFLOW_DETECTION)
+  // 2^(Pagetable_log - Page_log) = 1MB paged on demand.
+  int prot = PROT_NONE;
+#else
+  // 2^(Pagetable_log - Page_log) = 1MB initially mapped to the zero
+  // page and:
+  // - paged on demand if overcommitting is enabled on Linux,
+  // - committed up-front otherwise.
+  // todo: do better.
+  int prot = PROT_READ | PROT_WRITE;
+#endif
+  void *block = mmap(NULL, Pagetable_size, prot,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return -1;
-  caml_heap_table = (uintnat *)block;
+  caml_heap_table = (char *)block;
   return 0;
   // todo: free on shutdown
 }
 
-static void set_bit(uintnat p)
+/* Function called from a signal handler. It must be
+   async-signal-safe. This is called infrequently, and for a small
+   portion of caml_heap_table, thanks to the hints given to mmap in
+   [caml_alloc_for_heap] which tends to reserve inside
+   already-committed pages of caml_heap_table.
+*/
+int caml_page_table_fault(void *addr)
 {
-  caml_heap_table[p / Pages_per_entry] |=
-    (((uintnat)1) << (p % Pages_per_entry));
+  // Allocate a page of the heap table.
+  uintnat page = (uintnat)addr & Page_mask;
+  if (page < (uintnat)caml_heap_table ||
+      page >= (uintnat)caml_heap_table + Pagetable_size)
+    return 0;
+  if (-1 == mprotect((void *)page, Page_size, PROT_READ | PROT_WRITE)
+      && errno == ENOMEM) {
+    // We assume that this call is safe because the fault was caused
+    // in places in the runtime that are safe (for functions like
+    // malloc, printf..) and the program execution will end
+    // immediately afterwards.
+    caml_fatal_error("out of memory");
+  }
+  return 1;
 }
 
-static void clear_bit(uintnat p)
-{
-  caml_heap_table[p / Pages_per_entry] &=
-    ~(((uintnat)1) << (p % Pages_per_entry));
-}
-
-static int page_table_modify_range(int val, void * start, void * end)
+static int page_table_modify_range(int toclear, int toset,
+                                   void * start, void * end)
 {
   uintnat pstart = Large_page(start);
   uintnat pend = Large_page((uintnat)end - 1);
   uintnat p;
 
   for (p = pstart; p <= pend; p++) {
-    if (val) set_bit(p);
-    else clear_bit(p);
+    caml_heap_table[p] = (caml_heap_table[p] & ~toclear) | toset;
   }
   return 0;
 }
 
 int caml_page_table_add(int kind, void * start, void * end)
 {
-  if (kind == In_heap)
-    page_table_modify_range(1, start, end);
+  page_table_modify_range(0, kind, start, end);
   if (kind == In_static_data)
     static_area_insert(start, end);
   return 0;
@@ -127,7 +152,7 @@ int caml_page_table_add(int kind, void * start, void * end)
 int caml_page_table_remove(int kind, void * start, void * end)
 {
   CAMLassert(kind != In_static_data);
-  page_table_modify_range(0, start, end);
+  page_table_modify_range(kind, 0, start, end);
   return 0;
 }
 

@@ -656,7 +656,21 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       value v = *scan;
       if (Is_block_and_not_young(v)) {
 #ifndef NO_NAKED_POINTERS
-        if (!Is_in_heap(v)) continue;
+        uintnat p = Large_page(v);
+        char e = caml_heap_table[p];
+        if (UNLIKELY(!(e & In_heap))) {
+          if (UNLIKELY(!e)) {
+            // compare and set
+            char e = 0;
+            if (!__atomic_compare_exchange_n(&caml_heap_table[p], &e,
+                                             Tainted, 0,
+                                             __ATOMIC_ACQ_REL,
+                                             __ATOMIC_ACQUIRE)) {
+              if (e == In_heap) scan--;
+            }
+          }
+          continue;
+        }
 #endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
