@@ -62,9 +62,8 @@ static void init_static(void)
   for (i = 0; caml_data_segments[i].begin != 0; i++) {
     /* PR#5509: we must include the zero word at end of data segment,
        because pointers equal to caml_data_segments[i].end are static data. */
-    if (caml_page_table_add(In_static_data,
-                            caml_data_segments[i].begin,
-                            caml_data_segments[i].end + sizeof(value)) != 0)
+    if (caml_page_table_add_static_data(caml_data_segments[i].begin,
+                                caml_data_segments[i].end + sizeof(value)) != 0)
       caml_fatal_error("not enough memory for initial page table");
   }
 
@@ -131,13 +130,13 @@ value caml_startup_common(char_os **argv, int pooling)
 #endif
   caml_init_custom_operations();
   Caml_state->top_of_stack = &tos;
-  caml_init_signals();
   caml_init_gc (caml_init_minor_heap_wsz, caml_init_heap_wsz,
                 caml_init_heap_chunk_sz, caml_init_percent_free,
                 caml_init_max_percent_free, caml_init_major_window,
                 caml_init_custom_major_ratio, caml_init_custom_minor_ratio,
                 caml_init_custom_minor_max_bsz);
   init_static();
+  caml_init_signals();
 #ifdef _WIN32
   caml_win32_overflow_detection();
 #endif
