@@ -574,6 +574,9 @@ static uintnat rotate1(uintnat x)
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
 
+static uintnat count = 0;
+static uintnat count_skipped = 0;
+
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
   uintnat pb_enqueued = 0, pb_dequeued = 0;
@@ -582,16 +585,11 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   uintnat min_pb = Pb_min;
   struct mark_stack stk = *Caml_state->mark_stack;
 
-  uintnat young_start = (uintnat)Caml_state->young_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
+  uintnat young_start = (uintnat)Caml_state->young_alloc_start;
+  uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
+                            - (uintnat)Caml_state->young_alloc_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
-  //#define Is_major_block(v) (Is_block(v) && !Is_young(v))
-#else
-#define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
-#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -659,7 +657,16 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     for (; scan < scan_end; scan++) {
       value v = *scan;
-      if (Is_major_block(v)) {
+      if (Is_block_and_not_young(v)) {
+        count++;
+#ifndef NO_NAKED_POINTERS
+        if (!Is_in_heap(v)) {
+          count_skipped++;
+          if (count % 1000 == 0) fprintf(stderr, "skipped %ld out of %ld\n",
+                                         count_skipped, count);
+          continue;
+        }
+#endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
         }
