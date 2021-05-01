@@ -574,6 +574,9 @@ static uintnat rotate1(uintnat x)
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
 
+static uintnat count = 0;
+static uintnat count_skipped = 0;
+
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
   uintnat pb_enqueued = 0, pb_dequeued = 0;
@@ -655,8 +658,14 @@ CAMLnoinline static intnat do_some_marking(intnat work)
     for (; scan < scan_end; scan++) {
       value v = *scan;
       if (Is_block_and_not_young(v)) {
+        count++;
 #ifndef NO_NAKED_POINTERS
-        if (UNLIKELY(!Is_in_heap(v))) continue;
+        if (UNLIKELY(!Is_in_heap(v))) {
+          count_skipped++;
+          if (count % 1000 == 0) fprintf(stderr, "skipped %ld out of %ld\n",
+                                         count_skipped, count);
+          continue;
+        }
 #endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
