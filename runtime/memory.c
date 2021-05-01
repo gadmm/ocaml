@@ -220,9 +220,10 @@ char *caml_alloc_for_heap (asize_t request)
 #else
     int huge_pages = 0;
 #endif
-    uintnat page_size = huge_pages ? Heap_page_size : Page_size;
+//    uintnat page_size = huge_pages ? Heap_page_size : Page_size;
     request = request + sizeof(heap_chunk_head);
-    request = round_up(request, page_size);
+//    request = round_up(request, page_size);
+    request = round_up(request, Pagetable_page_size);
     reserve = round_up(request, Pagetable_page_size);
     request_virtual = reserve + Pagetable_page_size;
     /* hint at reserving near the previous block to
