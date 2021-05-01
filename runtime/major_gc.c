@@ -576,6 +576,17 @@ static uintnat rotate1(uintnat x)
 
 static uintnat count = 0;
 static uintnat count_skipped = 0;
+static struct skiplist skipped_cachelines_sk = SKIPLIST_STATIC_INITIALIZER;
+#define CACHELINE_LOG 6
+#define CACHELINE(p) ((uintnat)p >> CACHELINE_LOG)
+static int num_cachelines()
+{
+  int i = 0;
+  FOREACH_SKIPLIST_ELEMENT(v,&skipped_cachelines_sk, {
+      i++;
+    });
+  return i;
+}
 
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
@@ -662,8 +673,17 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 #ifndef NO_NAKED_POINTERS
         if (UNLIKELY(!Is_in_heap(v))) {
           count_skipped++;
-          if (count % 1000 == 0) fprintf(stderr, "skipped %ld out of %ld\n",
-                                         count_skipped, count);
+          caml_skiplist_insert(&skipped_cachelines_sk, CACHELINE(v), 0);
+          if (count % 1000 == 0) {
+            int i = num_cachelines();
+            fprintf(stderr,
+                    "skipped %ld out of %ld (%f%%); "
+                    "%d cachelines (%f%% unique)\n",
+                    count_skipped, count,
+                    ((float)count_skipped)/count * 100,
+                    i,
+                    ((float)i)/count_skipped * 100);
+          }
           continue;
         }
 #endif
