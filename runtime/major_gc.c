@@ -220,7 +220,6 @@ Caml_inline void mark_stack_push(struct mark_stack* stk, value block,
   CAMLassert(Tag_val(block) != Infix_tag);
   CAMLassert(Tag_val(block) < No_scan_tag);
 
-#if defined(NO_NAKED_POINTERS) || defined(NAKED_POINTERS_CHECKER)
   if (Tag_val(block) == Closure_tag) {
     /* Skip the code pointers and integers at beginning of closure;
         start scanning at the first word of the environment part. */
@@ -234,7 +233,6 @@ Caml_inline void mark_stack_push(struct mark_stack* stk, value block,
     CAMLassert(offset <= Wosize_val(block)
       && offset >= Start_env_closinfo(Closinfo_val(block)));
   }
-#endif
 
   end = (block_wsz < 8 ? block_wsz : 8);
 
