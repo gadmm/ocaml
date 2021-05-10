@@ -17,15 +17,17 @@
 
 #include <string.h>
 
-#include "caml/address_class.h"
 #include "caml/config.h"
 #include "caml/finalise.h"
 #include "caml/freelist.h"
 #include "caml/gc.h"
 #include "caml/gc_ctrl.h"
+#include "caml/heap_allocator.h"
+#include "caml/heap_map.h"
 #include "caml/major_gc.h"
 #include "caml/memory.h"
 #include "caml/mlvalues.h"
+#include "caml/platform.h"
 #include "caml/roots.h"
 #include "caml/weak.h"
 #include "caml/compact.h"
@@ -423,11 +425,9 @@ void caml_compact_heap (intnat new_allocation_policy)
                  + Wsize_bsize (Page_size);
   target_wsz = caml_clip_heap_chunk_wsz (target_wsz);
 
-#ifdef HAS_HUGE_PAGES
   if (caml_use_huge_pages
-      && Bsize_wsize (Caml_state->stat_heap_wsz) <= HUGE_PAGE_SIZE)
+      && Bsize_wsize (Caml_state->stat_heap_wsz) <= Huge_page_size)
     return;
-#endif
 
   if (target_wsz < Caml_state->stat_heap_wsz / 2){
     /* Recompact. */
@@ -443,7 +443,7 @@ void caml_compact_heap (intnat new_allocation_policy)
        recognized as free by the recompaction. */
     caml_make_free_blocks ((value *) chunk,
                            Wsize_bsize (Chunk_size (chunk)), 0, Caml_blue);
-    if (caml_page_table_add (In_heap, chunk, chunk + Chunk_size (chunk)) != 0){
+    if (!caml_heap_table_add(In_heap, chunk, chunk + Chunk_size (chunk))){
       caml_free_for_heap (chunk);
       return;
     }
@@ -470,11 +470,9 @@ void caml_compact_heap_maybe (double previous_overhead)
   if (Caml_state->stat_major_collections < 3) return;
   if (Caml_state->stat_heap_wsz <= 2 * caml_clip_heap_chunk_wsz (0)) return;
 
-#ifdef HAS_HUGE_PAGES
   if (caml_use_huge_pages
-      && Bsize_wsize (Caml_state->stat_heap_wsz) <= HUGE_PAGE_SIZE)
+      && Bsize_wsize (Caml_state->stat_heap_wsz) <= Huge_page_size)
     return;
-#endif
 
   if (previous_overhead >= caml_percent_max){
     double current_overhead;
