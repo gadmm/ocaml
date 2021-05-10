@@ -264,8 +264,6 @@
 
 #undef HAS_HUGE_PAGES
 
-#undef HUGE_PAGE_SIZE
-
 #undef HAS_BROKEN_PRINTF
 
 #undef HAS_STRERROR

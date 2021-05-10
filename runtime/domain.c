@@ -39,6 +39,7 @@ void caml_init_domain ()
   Caml_state->young_alloc_start = NULL;
   Caml_state->young_alloc_mid = NULL;
   Caml_state->young_alloc_end = NULL;
+  Caml_state->young_reserved = 0;
   Caml_state->young_trigger = NULL;
   Caml_state->minor_heap_wsz = 0;
   Caml_state->in_minor_collection = 0;
