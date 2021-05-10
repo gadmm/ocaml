@@ -16892,10 +16892,6 @@ _ACEOF
 if ac_fn_c_try_run "$LINENO"; then :
   $as_echo "#define HAS_HUGE_PAGES 1" >>confdefs.h
 
-    cat >>confdefs.h <<_ACEOF
-#define HUGE_PAGE_SIZE (4 * 1024 * 1024)
-_ACEOF
-
     { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 $as_echo "yes" >&6; }
 else

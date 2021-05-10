@@ -1116,12 +1116,10 @@ void caml_init_major_heap (asize_t heap_size)
 {
   int i;
 
-  Caml_state->stat_heap_wsz =
-    caml_clip_heap_chunk_wsz (Wsize_bsize (heap_size));
-  Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
-  CAMLassert (Bsize_wsize (Caml_state->stat_heap_wsz) % Page_size == 0);
+  heap_size =
+    Bsize_wsize (caml_clip_heap_chunk_wsz (Wsize_bsize (heap_size)));
   caml_heap_start =
-    (char *) caml_alloc_for_heap (Bsize_wsize (Caml_state->stat_heap_wsz));
+    (char *) caml_alloc_for_heap(heap_size);
   if (caml_heap_start == NULL)
     caml_fatal_error ("cannot allocate initial major heap");
   heap_size = Chunk_size (caml_heap_start);
