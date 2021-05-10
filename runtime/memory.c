@@ -80,13 +80,16 @@ int caml_page_table_initialize(mlsize_t bytesize)
   if (block == MAP_FAILED) return -1;
   caml_heap_table = (atomic_char *)block;
   caml_real_page_size = sysconf(_SC_PAGESIZE);
+  CAMLassert(caml_real_page_size >= Page_size);
   return 0;
   // TODO: free on shutdown
 }
 
-#define CAMLassert_aligned(n, m) \
+#define CAMLassert_aligned_(n, m)                     \
   (CAMLassert(((uintnat)n & ((uintnat)m - 1)) == 0))
-#define CAMLassert_is_power_of_2(n) CAMLassert_aligned(n, n)
+#define CAMLassert_aligned(n, m)                          \
+  (CAMLassert_is_power_of_2(m),CAMLassert_aligned_(n,m))
+#define CAMLassert_is_power_of_2(n) CAMLassert_aligned_(n, n)
 
 static uintnat round_up(uintnat n, uintnat mod)
 {
@@ -159,10 +162,10 @@ int caml_page_table_add(int kind, void * start, void * end)
       //   the same virtual space can later be acquired by the runtime.
       //
       // However we could be more lenient and just find someplace else
-      // (e.g., if the world declare their pages to OCaml in advance,
-      // it is safe to let them free the mapping, since we know to
-      // avoid it). This just needs a third error value and to prepare
-      // the callers.
+      // (in situations where the world declares their pages of
+      // interest to OCaml in advance, they can free the mapping and
+      // we know to avoid this range). This just needs a third error
+      // value and to adjust the callers.
       //
       // This is to ensure that the heap table is monotonic. This is
       // not a safety measure (there is no guarantee that the GC has
@@ -252,7 +255,7 @@ static int madvise_os(char *block, asize_t size, int madvice)
 }
 
 // can be used to recommit (does not destroy already-committed mapping)
-int caml_mem_commit_os(char *block, asize_t size, int hugepages)
+int caml_mem_commit_os(char *block, asize_t size)
 {
   // - Commit:
   //    - Ensure it fails on OOM if overcommitting is off.
@@ -264,7 +267,7 @@ int caml_mem_commit_os(char *block, asize_t size, int hugepages)
   /* MADV_DODUMP: cancel MADV_DONTDUMP */
   if (-1 == madvise_os(block, size, MADV_DODUMP)) return -1;
 #ifdef MADV_HUGEPAGE
-  if (hugepages) {
+  if (caml_use_huge_pages) {
     CAMLassert_aligned(size, Huge_page_size);
     /* Request huge pages (THP) if huge pages are enabled. Note: this
        can cause large pauses if /sys/kernel/mm/transparent_hugepage/defrag
@@ -338,7 +341,7 @@ int caml_mem_commit(char *block, asize_t request, asize_t *out_size)
 {
   request = caml_round_up_to_huge_page(request);
   /* Commit [block..block+size[ */
-  if (-1 == caml_mem_commit_os(block, request, caml_use_huge_pages)) goto err;
+  if (-1 == caml_mem_commit_os(block, request)) goto err;
   *out_size = request;
   return 0;
 err:

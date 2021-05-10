@@ -175,7 +175,7 @@ void caml_set_minor_heap_size (asize_t bsz)
   } else {
     // Grow in place
     bsz = caml_round_up_to_huge_page(bsz);
-    if (-1 == caml_mem_commit_os(heap, bsz, caml_use_huge_pages))
+    if (-1 == caml_mem_commit_os(heap, bsz))
       goto oom;
     caml_mem_decommit_os(heap + bsz, Caml_state->young_reserved - bsz);
   }
