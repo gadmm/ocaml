@@ -58,6 +58,9 @@
 #ifndef CAML_ADDRESS_CLASS_H
 #define CAML_ADDRESS_CLASS_H
 
+#include <assert.h>
+#include <stdatomic.h>
+
 #include "config.h"
 #include "misc.h"
 #include "mlvalues.h"
@@ -93,35 +96,58 @@
 #define In_young 2
 #define Unmanaged 4
 
+// Mask for the hardcoded page size (fast), used for static data
+#define Page_mask (~(Page_size - 1))
+
+// Real page size can be greater. (slower)
+CAMLextern uintnat caml_real_page_size;
+#define Real_page_size \
+  (CAMLassert(caml_real_page_size !=0), caml_real_page_size)
+#define Real_page_mask (~(Real_page_size - 1))
+
+/* There does not seem to be a way to ask the OS for the size of a
+   huge page. Legends tell that some systems have them larger than
+   2MB. Let's try:
+     x86-64, arm -> 2MB
+     i386 -> 4MB
+     ppc64 -> 64MB
+*/
+#define Huge_page_log 21 // 2MB
+#define Huge_page_size ((uintnat)1 << Huge_page_log)
+
 /* Page table: bitmap */
 
 #ifdef ARCH_SIXTYFOUR
 
+// can support 57 bits one day
 #define Pagetable_significant_bits 48
-#define Pagetable_page_log 28 // 256MB
+// TODO: might be better at 1GB (L4 idx + L3 idx)
+#define Pagetable_entry_log 28 // 256MB
+#define Pagetable_entry(p)                                            \
+  (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
+   >> Pagetable_entry_log)
 
 #else
 
 #define Pagetable_significant_bits 32
-#define Pagetable_page_log Page_log
+#define Pagetable_entry_log (Page_log + 2) // 16KB
+#define Pagetable_entry(p) ((uintnat)(p) >> Pagetable_entry_log)
 
 #endif /* ARCH_SIXTYFOUR */
 
-#define Pagetable_page_size ((uintnat)1 << Pagetable_page_log)
-#define Page_mask (~((uintnat)Page_size - 1))
-#define Large_page(p)                                                 \
-  (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
-   >> Pagetable_page_log)
+#define Pagetable_entry_size ((uintnat)1 << Pagetable_entry_log)
 
-CAMLextern char *caml_heap_table;
+static_assert(Huge_page_log < Pagetable_entry_log, "invalid page sizes");
+static_assert(Page_log < Huge_page_log, "invalid page sizes");
+
+CAMLextern atomic_char *caml_heap_table;
 
 int caml_is_in_static_data(void *a);
 
 inline int caml_classify_address(void *a, int kind)
 {
-  uintnat p = Large_page(a);
-  char e = caml_heap_table[p];
-  // char e = __atomic_load_n(&caml_heap_table[p], __ATOMIC_RELAXED);
+  uintnat p = Pagetable_entry(a);
+  char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
   CAMLassert(kind != 0);
   if (LIKELY(e & kind)) {
     /* no synchronisation required */
@@ -140,10 +166,9 @@ inline int caml_classify_address(void *a, int kind)
      mispredictions, etc. which could affect performance. We can
      already measure these and see that their effect is negligible if
      any. */
-  if (__atomic_compare_exchange_n(&caml_heap_table[p], &e,
-                                  Unmanaged, 0,
-                                  __ATOMIC_ACQ_REL,
-                                  __ATOMIC_ACQUIRE)) {
+  if (atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
+                                              Unmanaged, memory_order_acq_rel,
+                                              memory_order_acquire)) {
     return Unmanaged & kind;
   } else {
     // e != 0

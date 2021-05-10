@@ -421,11 +421,9 @@ void caml_compact_heap (intnat new_allocation_policy)
                  + Wsize_bsize (Page_size);
   target_wsz = caml_clip_heap_chunk_wsz (target_wsz);
 
-#ifdef HAS_HUGE_PAGES
   if (caml_use_huge_pages
-      && Bsize_wsize (Caml_state->stat_heap_wsz) <= HUGE_PAGE_SIZE)
+      && Bsize_wsize (Caml_state->stat_heap_wsz) <= Huge_page_size)
     return;
-#endif
 
   if (target_wsz < Caml_state->stat_heap_wsz / 2){
     /* Recompact. */
@@ -477,11 +475,9 @@ void caml_compact_heap_maybe (void)
   if (Caml_state->stat_major_collections < 3) return;
   if (Caml_state->stat_heap_wsz <= 2 * caml_clip_heap_chunk_wsz (0)) return;
 
-#ifdef HAS_HUGE_PAGES
   if (caml_use_huge_pages
-      && Bsize_wsize (Caml_state->stat_heap_wsz) <= HUGE_PAGE_SIZE)
+      && Bsize_wsize (Caml_state->stat_heap_wsz) <= Huge_page_size)
     return;
-#endif
 
   fw = 3.0 * caml_fl_cur_wsz - 2.0 * caml_fl_wsz_at_phase_change;
   if (fw < 0) fw = caml_fl_cur_wsz;

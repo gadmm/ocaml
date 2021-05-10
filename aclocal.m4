@@ -272,7 +272,6 @@ int main (int argc, char *argv[]){
 }
     ]])],
     [AC_DEFINE([HAS_HUGE_PAGES])
-    AC_DEFINE_UNQUOTED([HUGE_PAGE_SIZE], [(4 * 1024 * 1024)])
     AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])],
     [AC_MSG_RESULT([no assumed])])

@@ -58,12 +58,9 @@ CAMLextern value caml_check_urgent_gc (value);
 CAMLextern color_t caml_allocation_color (void *hp);
 #ifdef CAML_INTERNALS
 CAMLextern char *caml_alloc_for_heap (asize_t request);   /* Size in bytes. */
-CAMLextern char *caml_alloc_for_minor_heap(asize_t request);
 CAMLextern void caml_free_for_heap (char *mem);
 CAMLextern int caml_add_to_heap (char *mem);
 #endif /* CAML_INTERNALS */
-
-CAMLextern int caml_huge_fallback_count;
 
 
 /* [caml_stat_*] functions below provide an interface to the static memory
@@ -186,14 +183,17 @@ CAMLextern wchar_t* caml_stat_wcsconcat(int n, ...);
 
 extern uintnat caml_use_huge_pages;
 
-#ifdef HAS_HUGE_PAGES
-#include <sys/mman.h>
-#define Heap_page_size HUGE_PAGE_SIZE
-#endif
-
-
 int caml_page_table_add(int kind, void * start, void * end);
 int caml_page_table_initialize(mlsize_t bytesize);
+
+// TODO: separate header
+asize_t caml_round_up_to_huge_page(asize_t size);
+int caml_mem_reserve(asize_t request, int kind,
+                     char **out_block, asize_t *out_reserved);
+int caml_mem_commit(char *block, asize_t request, asize_t *out_size);
+void caml_mem_decommit(char * block, asize_t size);
+int caml_mem_commit_os(char *block, asize_t size, int hugepages);
+void caml_mem_decommit_os(char * block, asize_t size);
 
 #ifdef DEBUG
 #define DEBUG_clear(result, wosize) do{ \

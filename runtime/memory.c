@@ -15,11 +15,15 @@
 
 #define CAML_INTERNALS
 
+#include <assert.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <stdarg.h>
 #include <stddef.h>
+#include <unistd.h>
+#include <sys/mman.h>
 #include "caml/address_class.h"
 #include "caml/config.h"
 #include "caml/fail.h"
@@ -37,12 +41,6 @@
 #include "caml/memprof.h"
 #include "caml/eventlog.h"
 
-int caml_huge_fallback_count = 0;
-/* Number of times that mmapping big pages fails and we fell back to small
-   pages. This counter is available to the program through
-   [Gc.huge_fallback_count].
-*/
-
 uintnat caml_use_huge_pages = 0;
 /* True iff the program allocates heap chunks by mmapping huge pages.
    This is set when parsing [OCAMLRUNPARAM] and must stay constant
@@ -53,31 +51,13 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-char *caml_heap_table;
-static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
+atomic_char *caml_heap_table = NULL;
+uintnat caml_real_page_size = 0;
 
-#define Pagetable_log (Pagetable_significant_bits - Pagetable_page_log) // 20
+#define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log) // 20
 #define Pagetable_size (((uintnat)1 << Pagetable_log))
 
-int caml_is_in_static_data(void *addr)
-{
-  uintnat data;
-  return caml_skiplist_find(&static_area_sk,
-                            (uintnat)addr & Page_mask,
-                            &data);
-}
-
-static void static_area_insert(void * start, void * end)
-{
-  uintnat pstart = (uintnat) start & Page_mask;
-  uintnat pend = ((uintnat) end - 1) & Page_mask;
-  uintnat p;
-  // Lots of optimisation opportunities (just record the beginning and
-  // end of the whole segment, record ranges of pages...)
-  for (p = pstart; p <= pend; p += Page_size)
-    caml_skiplist_insert(&static_area_sk, p, 0);
-}
-
+// TODO: better portability of on-demand paging
 #define PAGE_TABLE_ON_DEMAND \
   (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
 
@@ -89,7 +69,7 @@ int caml_page_table_initialize(mlsize_t bytesize)
 #else
   // 2^(Pagetable_log - Page_log) = 1MB initially mapped to the zero
   // page and:
-  // - paged on demand if overcommitting is enabled,
+  // - allocated on demand if overcommitting is enabled,
   // - committed up-front otherwise.
   // (bytecode)
   int prot = PROT_READ | PROT_WRITE;
@@ -98,10 +78,15 @@ int caml_page_table_initialize(mlsize_t bytesize)
   void *block = mmap(NULL, Pagetable_size, prot,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return -1;
-  caml_heap_table = (char *)block;
+  caml_heap_table = (atomic_char *)block;
+  caml_real_page_size = sysconf(_SC_PAGESIZE);
   return 0;
-  // todo: free on shutdown
+  // TODO: free on shutdown
 }
+
+#define CAMLassert_aligned(n, m) \
+  (CAMLassert(((uintnat)n & ((uintnat)m - 1)) == 0))
+#define CAMLassert_is_power_of_2(n) CAMLassert_aligned(n, n)
 
 static uintnat round_up(uintnat n, uintnat mod)
 {
@@ -111,15 +96,16 @@ static uintnat round_up(uintnat n, uintnat mod)
 /* This is called infrequently, and for a small portion of
    caml_heap_table, thanks to the hints given to mmap inside
    [caml_alloc_for_heap] which tends to reserve heap inside
-   already-committed pages of caml_heap_table. */
+   already-committed pages of caml_heap_table. Must be
+   async-signal-safe.*/
 static int page_table_commit(uintnat start, uintnat end)
 {
   int ret = 0;
 #if PAGE_TABLE_ON_DEMAND
-  // fixme: use sysconf(_SC_PAGESIZE) instead of Page_log
-  uintnat page_start = start & Page_mask;
-  uintnat size = round_up(end - page_start, Page_size);
-  CAMLassert(page_start + size <= Pagetable_size);
+  uintnat page_start = start & Real_page_mask;
+  uintnat page_end = round_up(end, Real_page_size);
+  uintnat size = page_end - page_start;
+  CAMLassert(page_end <= Pagetable_size);
   ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
   CAMLassert(ret != -1 || errno == ENOMEM);
 #endif
@@ -135,53 +121,397 @@ static int page_table_commit(uintnat start, uintnat end)
 int caml_page_table_fault(void *addr)
 {
   uintnat p = (uintnat)addr;
-  // Allocate a page of the heap table.
+  // If outside of the page table, it is not ours
   if (p < (uintnat)caml_heap_table ||
       p >= (uintnat)caml_heap_table + Pagetable_size)
     return 0;
+  // Allocate a page of the heap table.
   if (-1 == page_table_commit(p, p + 1)) {
-    // We assume that this call is safe because the fault was caused
-    // in places in the runtime that are safe (for functions like
-    // malloc, printf..) and the program execution will end
-    // immediately afterwards.
+    // We assume that this call is safe because we cause the fault in
+    // places in the runtime that are safe for functions like malloc,
+    // printf... and the program execution will end immediately
+    // afterwards. We make the same assumption for the asserts inside
+    // page_table_commit.
     caml_fatal_error("out of memory");
   }
   return 1;
 }
 
+// Assumes that the caller owns the mapping from start to end, to
+// ensure that we are not racing to set the same entry twice.
+// Idempotent (returns 0 even if some page table entries are already
+// set to [kind]).
 int caml_page_table_add(int kind, void * start, void * end)
 {
-  uintnat pstart = Large_page(start);
-  uintnat pend = Large_page((uintnat)end - 1) + 1;
+  uintnat pstart = Pagetable_entry(start);
+  uintnat pend = Pagetable_entry((uintnat)end - 1) + 1;
   uintnat p;
+  int ret = 0;
   if (-1 == page_table_commit(pstart, pend)) return -1;
   for (p = pstart; p < pend; p++) {
     char e = 0;
-    if (!__atomic_compare_exchange_n(&caml_heap_table[p], &e,
-                                     kind, 0,
-                                     __ATOMIC_ACQ_REL,
-                                     __ATOMIC_ACQUIRE))
+    if (!atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
+                                                 kind, memory_order_acq_rel,
+                                                 memory_order_acquire))
       // It is a programming error to:
       // - Let foreign pointers be seen by the OCaml GC
       // - Release the underlying mapping of these pointers, so that
       //   the same virtual space can later be acquired by the runtime.
-      // However we could be more lenient and find someplace else.
-      // This is not a safety measure (there is no guarantee that the
-      // GC had the time to see all the naked pointers). What needs to
-      // be ensured is only that the heap table is monotonic.
-      return -(e != kind);
+      //
+      // However we could be more lenient and just find someplace else
+      // (e.g., if the world declare their pages to OCaml in advance,
+      // it is safe to let them free the mapping, since we know to
+      // avoid it). This just needs a third error value and to prepare
+      // the callers.
+      //
+      // This is to ensure that the heap table is monotonic. This is
+      // not a safety measure (there is no guarantee that the GC has
+      // the time to see all the naked pointers before OCaml acquires
+      // the mapping).
+      if (e != kind) ret = -1;
   }
-  return 0;
+  return ret;
+}
+
+/* Static data table */
+
+static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
+
+int caml_is_in_static_data(void *addr)
+{
+  uintnat data;
+  return caml_skiplist_find(&static_area_sk, (uintnat)addr & Page_mask, &data);
+}
+
+static void static_area_insert(void * start, void * end)
+{
+  uintnat pstart = (uintnat)start & Page_mask;
+  uintnat pend = ((uintnat)end - 1) & Page_mask;
+  uintnat p;
+  // Lots of optimisation opportunities (just record the beginning and
+  // end of the whole segment, record ranges of pages...)
+  for (p = pstart; p <= pend; p += Page_size)
+    caml_skiplist_insert(&static_area_sk, p, 0);
 }
 
 int caml_page_table_add_static_data(void * start, void * end)
 {
   if (-1 == caml_page_table_add(Unmanaged, start, end))
     return -1;
-  // todo: error handling?
+  // TODO: error handling? cf. skiplist
   static_area_insert(start, end);
   return 0;
 }
+
+
+/* Reservation, platform-specific */
+
+static void mem_unmap_os(char *block, asize_t size)
+{
+  if (size != 0) munmap(block, size);
+}
+
+/* Reserve memory, aligned at Pagetable_entry_size. [size] must be a
+   multiple of Pagetable_entry_size. */
+char * caml_mem_reserve_os(asize_t size)
+{
+  // All platforms except win32. TODO: see golang for win32.
+  static char *last_mem = NULL;
+  static asize_t last_size = 0;
+  char *mem;
+  char *block;
+  asize_t request_virtual = size + Pagetable_entry_size;
+  CAMLassert_aligned(size, Pagetable_entry_size);
+  // Hint at the end of the previously-reserved block
+  block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (block == MAP_FAILED) return NULL;
+  // Prefer contiguous if possible, to avoid holes in the VAS
+  if (block + size == last_mem)
+    // On Linux, the mmaped area grows downwards
+    mem = last_mem - size;
+  else
+    mem = (char *) round_up((uintnat)block, Pagetable_entry_size);
+  CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
+  /* free beginning */
+  mem_unmap_os(block, mem - block);
+  /* free end */
+  mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
+  /* [mem..mem+size[ is reserved */
+  last_mem = mem;
+  last_size = size;
+  return mem;
+}
+
+static int madvise_os(char *block, asize_t size, int madvice)
+{
+  int err;
+  // EAGAIN is Linux-specific
+  while (-1 == (err = madvise(block, size, madvice)) && errno == EAGAIN) {};
+  return err;
+}
+
+// can be used to recommit (does not destroy already-committed mapping)
+int caml_mem_commit_os(char *block, asize_t size, int hugepages)
+{
+  // - Commit:
+  //    - Ensure it fails on OOM if overcommitting is off.
+  //    - MADV_FREE_REUSE on Darwin
+  //    - MADV_DODUMP, MADV_CORE. Darwin: none.
+  CAMLassert_aligned(block, Huge_page_size);
+  CAMLassert_aligned(size, Real_page_size);
+  if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
+  /* MADV_DODUMP: cancel MADV_DONTDUMP */
+  if (-1 == madvise_os(block, size, MADV_DODUMP)) return -1;
+#ifdef MADV_HUGEPAGE
+  if (hugepages) {
+    CAMLassert_aligned(size, Huge_page_size);
+    /* Request huge pages (THP) if huge pages are enabled. Note: this
+       can cause large pauses if /sys/kernel/mm/transparent_hugepage/defrag
+       is set to [always], [madvise] or [defer+madvise], since OCaml
+       will try to touch a lot of huge pages at once. [defer] is
+       preferred. */
+    if (-1 == madvise_os(block, size, MADV_HUGEPAGE)) return -1;
+    /* TODO:
+       - 1GB hugepage support.
+       - restore hugetlb behaviour for backwards-compat. */
+  }
+#endif
+  return 0;
+}
+
+void caml_mem_decommit_os(char * block, asize_t size)
+{
+  // - Decommit:
+  //    - MADV_DONTNEED on Linux with overcommitting, MADV_FREE on BSD
+  //      and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
+  //      fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
+  //    - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
+  //      overcommitting (see jemalloc,glibc malloc)
+  //      (https://github.com/bminor/glibc/commit/9fab36eb58)
+  //    - MADV_FREE exists on Linux, so be careful about #ifdef.
+  //    - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
+  //      core files, but seems to help gdb) Darwin: NONE
+  if (size == 0) return;
+  CAMLassert_aligned(block, Real_page_size);
+  CAMLassert_aligned(size, Real_page_size);
+  mprotect(block, size, PROT_NONE);
+  madvise_os(block, size, MADV_DONTNEED);
+  madvise_os(block, size, MADV_DONTDUMP);
+}
+
+
+/* Reserving, committing, decommitting. Platform-independent. */
+
+
+/* Heuristic to round up to the nearest small page or huge page,
+   depending on what is best. */
+asize_t caml_round_up_to_huge_page(asize_t size)
+{
+  asize_t page_size = caml_use_huge_pages ?
+    Huge_page_size : Real_page_size;
+  return round_up(size, page_size);
+}
+
+// reserve at least [request] contiguous memory and record it with the
+// page table.
+int caml_mem_reserve(asize_t request, int kind,
+                     char **out_block, asize_t *out_reserved)
+{
+  char *mem;
+  request = round_up(request, Pagetable_entry_size);
+  /* hint at reserving near the previous block to
+     have a good location in the page table. */
+  mem = caml_mem_reserve_os(request);
+  if (mem == NULL) return -1;
+  *out_block = mem;
+  *out_reserved = request;
+  /* keep reserved in case of error of the page table */
+  return caml_page_table_add(kind, mem, mem + request);
+}
+
+/* [block] must be aligned to huge pages, and there must be enough
+   space to round request up to the nearest page or huge page. If
+   successful, [out_size] is set to the size that was actually
+   committed. */
+int caml_mem_commit(char *block, asize_t request, asize_t *out_size)
+{
+  request = caml_round_up_to_huge_page(request);
+  /* Commit [block..block+size[ */
+  if (-1 == caml_mem_commit_os(block, request, caml_use_huge_pages)) goto err;
+  *out_size = request;
+  return 0;
+err:
+  caml_mem_decommit_os(block, request);
+  return -1;
+}
+
+/* [block] and [size] must be aligned to Real_page_size. */
+void caml_mem_decommit(char * block, asize_t size)
+{
+  caml_mem_decommit_os(block, size);
+}
+
+
+/* A best-fit allocator for reserved virtual address space */
+
+#ifdef ARCH_SIXTYFOUR
+#define HALF_BITS 32
+#else
+#define HALF_BITS 16
+#endif
+
+#define HALF_BITS_MASK (((uintnat)1 << HALF_BITS) - 1)
+
+static struct skiplist vas_free_per_address_sk = SKIPLIST_STATIC_INITIALIZER;
+static struct skiplist vas_free_per_size_sk = SKIPLIST_STATIC_INITIALIZER;
+/* key: size in number of huge pages (opposite) followed by msbs of
+   address (lexicographic ordering) */
+
+static_assert(Pagetable_significant_bits - Huge_page_log <= HALF_BITS,
+              "invalid page sizes");
+
+static uintnat vas_size_key(char *block, asize_t size)
+{
+  uintnat compl_num_elems;
+  uintnat small_address;
+  CAMLassert_aligned(size, Huge_page_size);
+  CAMLassert_aligned(block, Huge_page_size);
+  // Half upper bits: size of the mapping, order reversed
+  compl_num_elems = ~((uintnat)size >> Huge_page_log);
+  compl_num_elems <<= HALF_BITS;
+  if (block != NULL) {
+    // Half lower bits: address of the mapping
+    small_address = ((uintnat)block >> Huge_page_log) & HALF_BITS_MASK;
+  } else {
+    // Half lower bits: greater than any address
+    small_address = HALF_BITS_MASK;
+  }
+  return compl_num_elems + small_address;
+}
+
+// assumes (address, num_elems) is a member of the freelist
+static void vas_remove_free(char *block, asize_t size)
+{
+  int res;
+  uintnat key = vas_size_key(block, size);
+  res = caml_skiplist_remove(&vas_free_per_address_sk, (uintnat)block);
+  res = res && caml_skiplist_remove(&vas_free_per_size_sk, key);
+  CAMLassert(res);
+}
+
+// assumes (address, num_elems) is not a member of the freelist
+static void vas_add_free(char *block, asize_t size)
+{
+  caml_skiplist_insert(&vas_free_per_address_sk, (uintnat)block, (uintnat)size);
+  caml_skiplist_insert(&vas_free_per_size_sk,
+                       vas_size_key(block, size),
+                       (uintnat)block);
+}
+
+static int vas_find_address(char *block, asize_t *size)
+{
+  return caml_skiplist_find(&vas_free_per_address_sk, (uintnat)block, size);
+}
+
+static int vas_find_below_address(char *block, char **block_before,
+                                  asize_t *size)
+{
+  uintnat address;
+  if (caml_skiplist_find_below(&vas_free_per_address_sk, (uintnat)block,
+                               &address, size)) {
+    *block_before = (char *)address;
+    return 1;
+  }
+  return 0;
+}
+
+static int vas_find_above_size(asize_t size, char **block, asize_t *available)
+{
+  uintnat key, address;
+  if (caml_skiplist_find_below(&vas_free_per_size_sk, vas_size_key(NULL, size),
+                               &key, &address)) {
+    *block = (char *)address;
+    vas_find_address(*block, available);
+    return 1;
+  }
+  return 0;
+}
+
+static void vas_merge(char *block, asize_t size)
+{
+  char *block_before;
+  char *block_after = block + size;
+  asize_t size_before, size_after;
+  // Merge with block before
+  if (vas_find_below_address(block, &block_before, &size_before)) {
+    if (block_before + size_before == block) {
+      vas_remove_free(block_before, size_before);
+      block = block_before;
+      size += size_before;
+    }
+  }
+  // Merge with block after
+  if (vas_find_address(block_after, &size_after)) {
+    vas_remove_free(block_after, size_after);
+    size += size_after;
+  }
+  vas_add_free(block, size);
+}
+
+// returns 1 on success, 0 if out of reserved space
+static int vas_alloc(asize_t request, char **block, asize_t *size)
+{
+  asize_t available;
+  request = round_up(request, Huge_page_size);
+  if (vas_find_above_size(request, block, &available)) {
+    char *new_block = *block + request;
+    vas_remove_free(*block, available);
+    available -= request;
+    vas_add_free(new_block, request);
+    *size = request;
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+int caml_vas_commit(asize_t request, char **out_block, asize_t *out_size,
+                    asize_t *out_reserved)
+{
+  char *block;
+  asize_t reserved;
+  if (!vas_alloc(request, &block, &reserved)) {
+    // Out of already-reserved space
+    int ret;
+    char *mem;
+    asize_t new_reserve;
+    // Reserve a large-enough space
+    // TODO: unmap on shutdown
+    if (-1 == caml_mem_reserve(request, In_heap, &mem, &new_reserve))
+      return -1;
+    vas_merge(mem, new_reserve);
+    // Now it should succeed
+    ret = vas_alloc(request, &block, &reserved);
+    CAMLassert(ret == 1);
+    (void)ret;
+  }
+  if (-1 == caml_mem_commit(block, request, &request)) goto err;
+  *out_block = block;
+  *out_size = request;
+  *out_reserved = reserved;
+  return 0;
+err:
+  vas_merge(block, reserved);
+  return -1;
+}
+
+void caml_vas_decommit(char * block, asize_t size)
+{
+  caml_mem_decommit(block, size);
+  vas_merge(block, size);
+}
+
 
 /* Allocate a block of the requested size, to be passed to
    [caml_add_to_heap] later.
@@ -194,105 +524,29 @@ int caml_page_table_add_static_data(void * start, void * end)
 */
 char *caml_alloc_for_heap (asize_t request)
 {
-  static void *last_block = NULL;
+  // TODO: free on shutdown
   char *mem;
-  asize_t request_virtual;
   char *block;
-  if (caml_use_huge_pages){
-#ifndef HAS_HUGE_PAGES
+  asize_t reserved;
+  request = request + sizeof(heap_chunk_head);
+  if (-1 == caml_vas_commit(request, &block, &request, &reserved))
     return NULL;
-#else
-    uintnat size = round_up(request + sizeof(heap_chunk_head), Heap_page_size);
-    CAMLassert(Heap_page_size >= Pagetable_page_size); // TODO: always false
-    block = mmap (NULL, size, PROT_READ | PROT_WRITE,
-                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
-    if (block == MAP_FAILED) return NULL;
-    mem = block + sizeof (heap_chunk_head);
-    CAMLassert( ((uintnat) block & (Heap_page_size - 1)) == 0 );
-    Chunk_size (mem) = size - sizeof (heap_chunk_head);
-    Chunk_block (mem) = block;
-#endif
-  }else{
-    asize_t reserve;
-    // todo: free on shutdown
-    // todo: have a better test for THP availability
-#ifdef HAS_HUGE_PAGES
-    int huge_pages = 1;//request > (Heap_page_size / 2);
-#else
-    int huge_pages = 0;
-#endif
-    uintnat page_size = huge_pages ? Heap_page_size : Page_size;
-    request = request + sizeof(heap_chunk_head);
-    request = round_up(request, page_size);
-    reserve = round_up(request, Pagetable_page_size);
-    request_virtual = reserve + Pagetable_page_size;
-    /* hint at reserving near the previous block to
-       have a good location in the page table. */
-    block = mmap(last_block, request_virtual, PROT_NONE,
-                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (block == MAP_FAILED) return NULL;
-    mem = (char *) round_up((uintnat) block, Pagetable_page_size);
-    CAMLassert((uintnat) mem + reserve <= (uintnat) block + request_virtual);
-    /* free beginning */
-    munmap(block, mem - block);
-    /* free end */
-    munmap(mem + reserve, request_virtual - (mem - block) - reserve);
-    /* [mem..mem+reserve[ is reserved */
-#ifdef HAS_HUGE_PAGES
-    /* Request huge pages (THP), always. Note: this can cause large
-       pauses if /sys/kernel/mm/transparent_hugepage/defrag is set to
-       [always] or [madvise]. However, benefits are already observed
-       without this call.
-       TODO: Either one can let the user be responsible for their
-       defrag setting (at risk of breaking workflows), or one can
-       repurpose the H option for doing the call below. */
-    if (huge_pages) {
-      if (madvise(mem, request, MADV_HUGEPAGE) == -1) goto err;
-    }
-#endif
-    /* Commit [mem..mem+request[ */
-    if (mprotect(mem, request, PROT_READ | PROT_WRITE) == -1) goto err;
-    block = mem;
-    mem += sizeof(heap_chunk_head);
-    Chunk_size(mem) = request - sizeof(heap_chunk_head);
-    Chunk_block(mem) = block;
-    Chunk_block_size(mem) = reserve;
-    last_block = block;
-  }
+  mem = block + sizeof(heap_chunk_head);
+  Chunk_size(mem) = request - sizeof(heap_chunk_head);
+  Chunk_block(mem) = block;
+  Chunk_block_size(mem) = reserved;
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_first.end = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_end = (value*)mem;
   return mem;
- err:
-  munmap(block, request_virtual);
-  return NULL;
-}
-
-/* Same as caml_alloc_for_heap, but avoids e.g. serving a 4MB block in
-   response to a 2MB request. Instead, serve a block slightly smaller
-   than requested. */
-char *caml_alloc_for_minor_heap(asize_t request)
-{
-  return caml_alloc_for_heap(request - sizeof(heap_chunk_head));
 }
 
 /* Use this function to free a block allocated with
-   [caml_alloc_for_heap] or [caml_alloc_for_minor_heap] if you don't
-   add it with [caml_add_to_heap].
+   [caml_alloc_for_heap] if you don't add it with [caml_add_to_heap].
 */
 void caml_free_for_heap (char *mem)
 {
-  if (caml_use_huge_pages){
-#ifdef HAS_HUGE_PAGES
-    munmap (Chunk_block (mem), Chunk_size (mem) + sizeof (heap_chunk_head));
-#else
-    CAMLassert (0);
-#endif
-  }else{
-    // Keep reserved (monotonicity of the heap table).
-    mprotect(Chunk_block(mem), Chunk_block_size(mem), PROT_NONE);
-    // todo: re-use reserved mappings.
-  }
+  caml_vas_decommit(Chunk_block(mem), Chunk_block_size(mem));
 }
 
 /* Take a chunk of memory as argument, which must be the result of a

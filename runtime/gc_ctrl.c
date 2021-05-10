@@ -352,7 +352,7 @@ CAMLprim value caml_gc_counters(value v)
 
 CAMLprim value caml_gc_huge_fallback_count (value v)
 {
-  return Val_long (caml_huge_fallback_count);
+  return Val_long(0);
 }
 
 CAMLprim value caml_gc_get(value v)
