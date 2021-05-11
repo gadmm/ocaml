@@ -79,7 +79,7 @@ static void static_area_insert(void * start, void * end)
 }
 
 #define PAGE_TABLE_ON_DEMAND \
-  (defined(NATIVE_CODE) && defined(HAS_STACK_OVERFLOW_DETECTION))
+  (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
@@ -89,11 +89,12 @@ int caml_page_table_initialize(mlsize_t bytesize)
 #else
   // 2^(Pagetable_log - Page_log) = 1MB initially mapped to the zero
   // page and:
-  // - paged on demand if overcommitting is enabled on Linux,
+  // - paged on demand if overcommitting is enabled,
   // - committed up-front otherwise.
-  // todo: do better.
+  // (bytecode)
   int prot = PROT_READ | PROT_WRITE;
 #endif
+  // TODO: win32
   void *block = mmap(NULL, Pagetable_size, prot,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return -1;
