@@ -167,9 +167,10 @@ DECLARE_SIGNAL_HANDLER(trap_handler)
 }
 #endif
 
-/* Machine- and OS-dependent handling of stack overflow */
+/* Machine- and OS-dependent handling of SIGSEGV */
 
-#ifdef HAS_STACK_OVERFLOW_DETECTION
+#ifdef POSIX_SIGNALS
+
 #ifndef CONTEXT_SP
 #error "CONTEXT_SP is required if HAS_STACK_OVERFLOW_DETECTION is defined"
 #endif
@@ -195,6 +196,7 @@ DECLARE_SIGNAL_HANDLER(segv_handler)
 
   if (caml_page_table_fault(fault_addr)) return;
 
+#ifdef HAS_STACK_OVERFLOW_DETECTION
   /* Sanity checks:
      - faulting address is word-aligned
      - faulting address is on the stack, or within EXTRA_STACK of it
@@ -213,10 +215,11 @@ DECLARE_SIGNAL_HANDLER(segv_handler)
 #ifdef CONTEXT_PC
     CONTEXT_C_ARG_1 = (context_reg) Caml_state;
     CONTEXT_PC = (context_reg) &caml_stack_overflow;
+    return;
 #else
 #error "CONTEXT_PC must be defined if RETURN_AFTER_STACK_OVERFLOW is"
 #endif
-#else
+#else // RETURN_AFTER_STACK_OVERFLOW
     /* Raise a Stack_overflow exception straight from this signal handler */
 #if defined(CONTEXT_YOUNG_PTR) && defined(CONTEXT_EXCEPTION_POINTER)
     Caml_state->exception_pointer == (char *) CONTEXT_EXCEPTION_POINTER;
@@ -224,25 +227,30 @@ DECLARE_SIGNAL_HANDLER(segv_handler)
 #endif
     caml_raise_stack_overflow();
 #endif
+  }
+#endif // HAS_STACK_OVERFLOW_DETECTION
+
 #ifdef NAKED_POINTERS_CHECKER
-  } else if (Caml_state->checking_pointer_pc) {
+  if (Caml_state->checking_pointer_pc) {
 #ifdef CONTEXT_PC
     CONTEXT_PC = (context_reg)Caml_state->checking_pointer_pc;
 #else
 #error "CONTEXT_PC must be defined if RETURN_AFTER_STACK_OVERFLOW is"
 #endif /* CONTEXT_PC */
-#endif /* NAKED_POINTERS_CHECKER */
-  } else {
-    /* Otherwise, deactivate our exception handler and return,
-       causing fatal signal to be generated at point of error. */
-    act.sa_handler = SIG_DFL;
-    act.sa_flags = 0;
-    sigemptyset(&act.sa_mask);
-    sigaction(SIGSEGV, &act, NULL);
+    return;
   }
+#endif /* NAKED_POINTERS_CHECKER */
+
+  /* Otherwise, deactivate our exception handler and raise SIGSEGV
+     again. */
+  act.sa_handler = SIG_DFL;
+  act.sa_flags = 0;
+  sigemptyset(&act.sa_mask);
+  sigaction(SIGSEGV, &act, NULL);
+  raise(SIGSEGV);
 }
 
-#endif
+#endif // POSIX_SIGNALS
 
 /* Initialization of signal stuff */
 
@@ -269,7 +277,7 @@ void caml_init_signals(void)
   }
 #endif
 
-#ifdef HAS_STACK_OVERFLOW_DETECTION
+#ifdef POSIX_SIGNALS
   {
     stack_t stk;
     struct sigaction act;
@@ -286,7 +294,7 @@ void caml_init_signals(void)
 
 CAMLexport void caml_setup_stack_overflow_detection(void)
 {
-#ifdef HAS_STACK_OVERFLOW_DETECTION
+#ifdef POSIX_SIGNALS
   stack_t stk;
   stk.ss_sp = malloc(SIGSTKSZ);
   stk.ss_size = SIGSTKSZ;
