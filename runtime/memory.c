@@ -230,7 +230,7 @@ char * caml_mem_reserve_os(asize_t size)
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return NULL;
   // Prefer contiguous if possible, to avoid holes in the VAS
-  if (block + size == last_mem)
+  if (block + request_virtual == last_mem)
     // On Linux, the mmaped area grows downwards
     mem = last_mem - size;
   else
@@ -358,146 +358,171 @@ void caml_mem_decommit(char * block, asize_t size)
 
 /* A best-fit allocator for reserved virtual address space */
 
-#ifdef ARCH_SIXTYFOUR
-#define HALF_BITS 32
-#else
-#define HALF_BITS 16
-#endif
+typedef struct {
+  int const page_log;
+  /* size of pages managed, typically Huge_page_log or Page_log */
+  struct skiplist free_per_address_sk;
+  /* address of each allocated block and its size */
+  struct skiplist free_per_size_sk;
+  /* each allocated block ordered per decreasing size.
 
-#define HALF_BITS_MASK (((uintnat)1 << HALF_BITS) - 1)
+     key: lexicographic ordering by size (decreasing) and address.
 
-static struct skiplist vas_free_per_address_sk = SKIPLIST_STATIC_INITIALIZER;
-static struct skiplist vas_free_per_size_sk = SKIPLIST_STATIC_INITIALIZER;
-/* key: size in number of huge pages (opposite) followed by msbs of
-   address (lexicographic ordering) */
+       ~( # huge pages )      msbs of address
+     |-------------------|------------------------|
+        num_max_log bits   small_address_log bits
+  */
+} page_allocator;
 
-static_assert(Pagetable_significant_bits - Huge_page_log <= HALF_BITS,
-              "invalid page sizes");
+#define PAGE_ALLOCATOR_STATIC_INITIALIZER(page_log) \
+  { page_log, SKIPLIST_STATIC_INITIALIZER, SKIPLIST_STATIC_INITIALIZER }
 
-static uintnat vas_size_key(char *block, asize_t size)
+/*static struct skiplist vas_free_per_address_sk = SKIPLIST_STATIC_INITIALIZER;
+static struct skiplist vas_free_per_size_sk = SKIPLIST_STATIC_INITIALIZER;*/
+
+#define PA_page_size(pa) ((uintnat)1 << pa->page_log)
+#define PA_small_address_log(pa) (Pagetable_significant_bits - pa->page_log)
+#define PA_small_address_mask(pa) (((uintnat)1 << PA_small_address_log(pa)) - 1)
+#define PA_num_max_log(pa) (8 * sizeof(uintnat) - PA_small_address_log(pa))
+#define PA_size_max(pa) \
+  ((((uintnat)1 << PA_num_max_log(pa)) - 1) << pa->page_log)
+
+static uintnat pa_size_key(page_allocator *pa, char *block, asize_t size)
 {
   uintnat compl_num_elems;
   uintnat small_address;
-  CAMLassert_aligned(size, Huge_page_size);
-  CAMLassert_aligned(block, Huge_page_size);
-  // Half upper bits: size of the mapping, order reversed
-  compl_num_elems = ~((uintnat)size >> Huge_page_log);
-  compl_num_elems <<= HALF_BITS;
+  CAMLassert_aligned(size, PA_page_size(pa));
+  CAMLassert_aligned(block, PA_page_size(pa));
+  CAMLassert(size <= PA_size_max(pa));
+  compl_num_elems = ~((uintnat)size >> pa->page_log);
+  compl_num_elems <<= PA_small_address_log(pa);
   if (block != NULL) {
-    // Half lower bits: address of the mapping
-    small_address = ((uintnat)block >> Huge_page_log) & HALF_BITS_MASK;
+    // address of the mapping
+    small_address =
+      ((uintnat)block >> pa->page_log) & PA_small_address_mask(pa);
   } else {
-    // Half lower bits: greater than any address
-    small_address = HALF_BITS_MASK;
+    // greater than any address
+    small_address = PA_small_address_mask(pa);
   }
   return compl_num_elems + small_address;
 }
 
-// assumes (address, num_elems) is a member of the freelist
-static void vas_remove_free(char *block, asize_t size)
+// assumes (block, size) is a member of the freelist
+static void pa_remove_free(page_allocator *pa, char *block, asize_t size)
 {
-  int res;
-  uintnat key = vas_size_key(block, size);
-  res = caml_skiplist_remove(&vas_free_per_address_sk, (uintnat)block);
-  res = res && caml_skiplist_remove(&vas_free_per_size_sk, key);
-  CAMLassert(res);
+  uintnat key = pa_size_key(pa, block, size);
+  caml_skiplist_remove(&pa->free_per_address_sk, (uintnat)block)
+    ?: CAMLassert(0);
+  caml_skiplist_remove(&pa->free_per_size_sk, key) ?: CAMLassert(0);
 }
 
-// assumes (address, num_elems) is not a member of the freelist
-static void vas_add_free(char *block, asize_t size)
+// assumes (block, size) is not a member of the freelist and size < Size_max.
+static void pa_add_free(page_allocator *pa, char *block, asize_t size)
 {
-  caml_skiplist_insert(&vas_free_per_address_sk, (uintnat)block, (uintnat)size);
-  caml_skiplist_insert(&vas_free_per_size_sk,
-                       vas_size_key(block, size),
+  caml_skiplist_insert(&pa->free_per_address_sk, (uintnat)block, (uintnat)size);
+  caml_skiplist_insert(&pa->free_per_size_sk, pa_size_key(pa, block, size),
                        (uintnat)block);
 }
 
-static int vas_find_address(char *block, asize_t *size)
+static int pa_find_address(page_allocator *pa, char *block, asize_t *size_out)
 {
-  return caml_skiplist_find(&vas_free_per_address_sk, (uintnat)block, size);
+  return caml_skiplist_find(&pa->free_per_address_sk, (uintnat)block, size_out);
 }
 
-static int vas_find_below_address(char *block, char **block_before,
-                                  asize_t *size)
+static int pa_find_below_address(page_allocator *pa, char *addr,
+                                 char **block_out, asize_t *size_out)
 {
   uintnat address;
-  if (caml_skiplist_find_below(&vas_free_per_address_sk, (uintnat)block,
-                               &address, size)) {
-    *block_before = (char *)address;
+  if (caml_skiplist_find_below(&pa->free_per_address_sk, (uintnat)addr,
+                               &address, size_out)) {
+    *block_out = (char *)address;
     return 1;
   }
   return 0;
 }
 
-static int vas_find_above_size(asize_t size, char **block, asize_t *available)
+/* size <= PA_size_max */
+static int pa_find_above_size(page_allocator *pa, asize_t size,
+                              char **block_out, asize_t *available_out)
 {
   uintnat key, address;
-  if (caml_skiplist_find_below(&vas_free_per_size_sk, vas_size_key(NULL, size),
+  if (caml_skiplist_find_below(&pa->free_per_size_sk,
+                               pa_size_key(pa, NULL, size),
                                &key, &address)) {
-    *block = (char *)address;
-    vas_find_address(*block, available);
+    *block_out = (char *)address;
+    pa_find_address(pa, *block_out, available_out) ?: CAMLassert(0);
     return 1;
   }
   return 0;
 }
 
-static void vas_merge(char *block, asize_t size)
+/* (block, size) must not overlap with existing ranges in the
+   allocator. */
+static void pa_merge(page_allocator *pa, char *block, asize_t size)
 {
   char *block_before;
   char *block_after = block + size;
   asize_t size_before, size_after;
   // Merge with block before
-  if (vas_find_below_address(block, &block_before, &size_before)) {
-    if (block_before + size_before == block) {
-      vas_remove_free(block_before, size_before);
+  if (pa_find_below_address(pa, block, &block_before, &size_before)) {
+    if (block_before + size_before == block
+        && size + size_before <= PA_size_max(pa)) {
+      pa_remove_free(pa, block_before, size_before);
       block = block_before;
       size += size_before;
     }
   }
   // Merge with block after
-  if (vas_find_address(block_after, &size_after)) {
-    vas_remove_free(block_after, size_after);
+  if (pa_find_address(pa, block_after, &size_after)
+      && size + size_after <= PA_size_max(pa)) {
+    pa_remove_free(pa, block_after, size_after);
     size += size_after;
   }
-  vas_add_free(block, size);
+  pa_add_free(pa, block, size);
 }
 
 // returns 1 on success, 0 if out of reserved space
-static int vas_alloc(asize_t request, char **block, asize_t *size)
+static int pa_alloc(page_allocator *pa, asize_t request,
+                    char **block_out, asize_t *size_out)
 {
   asize_t available;
-  request = round_up(request, Huge_page_size);
-  if (vas_find_above_size(request, block, &available)) {
-    char *new_block = *block + request;
-    vas_remove_free(*block, available);
+  request = round_up(request, PA_page_size(pa));
+  if (pa_find_above_size(pa, request, block_out, &available)) {
+    char *new_block = *block_out + request;
+    pa_remove_free(pa, *block_out, available);
     available -= request;
-    vas_add_free(new_block, request);
-    *size = request;
+    pa_add_free(pa, new_block, available);
+    *size_out = request;
     return 1;
   } else {
     return 0;
   }
 }
 
-int caml_vas_commit(asize_t request, char **out_block, asize_t *out_size,
-                    asize_t *out_reserved)
+/* fast */
+int caml_pa_contains(page_allocator *pa, char *addr)
+{
+  char *block;
+  asize_t size;
+  return pa_find_below_address(pa, addr, &block, &size) && addr < block + size;
+}
+
+int caml_pa_commit(page_allocator *pa, asize_t request,
+                   char **out_block, asize_t *out_size, asize_t *out_reserved)
 {
   char *block;
   asize_t reserved;
-  if (!vas_alloc(request, &block, &reserved)) {
+  if (!pa_alloc(pa, request, &block, &reserved)) {
     // Out of already-reserved space
-    int ret;
     char *mem;
     asize_t new_reserve;
     // Reserve a large-enough space
     // TODO: unmap on shutdown
     if (-1 == caml_mem_reserve(request, In_heap, &mem, &new_reserve))
       return -1;
-    vas_merge(mem, new_reserve);
+    pa_merge(pa, mem, new_reserve);
     // Now it should succeed
-    ret = vas_alloc(request, &block, &reserved);
-    CAMLassert(ret == 1);
-    (void)ret;
+    pa_alloc(pa, request, &block, &reserved) ?: CAMLassert(0);
   }
   if (-1 == caml_mem_commit(block, request, &request)) goto err;
   *out_block = block;
@@ -505,16 +530,18 @@ int caml_vas_commit(asize_t request, char **out_block, asize_t *out_size,
   *out_reserved = reserved;
   return 0;
 err:
-  vas_merge(block, reserved);
+  pa_merge(pa, block, reserved);
   return -1;
 }
 
-void caml_vas_decommit(char * block, asize_t size)
+void caml_pa_decommit(page_allocator *pa, char * block, asize_t size)
 {
   caml_mem_decommit(block, size);
-  vas_merge(block, size);
+  pa_merge(pa, block, size);
 }
 
+static page_allocator vas_allocator =
+  PAGE_ALLOCATOR_STATIC_INITIALIZER(Huge_page_log);
 
 /* Allocate a block of the requested size, to be passed to
    [caml_add_to_heap] later.
@@ -530,12 +557,13 @@ char *caml_alloc_for_heap (asize_t request)
   // TODO: free on shutdown
   char *mem;
   char *block;
-  asize_t reserved;
-  request = request + sizeof(heap_chunk_head);
-  if (-1 == caml_vas_commit(request, &block, &request, &reserved))
+  asize_t reserved, committed;
+  request += sizeof(heap_chunk_head);
+  if (-1 == caml_pa_commit(&vas_allocator, request,
+                           &block, &committed, &reserved))
     return NULL;
   mem = block + sizeof(heap_chunk_head);
-  Chunk_size(mem) = request - sizeof(heap_chunk_head);
+  Chunk_size(mem) = committed - sizeof(heap_chunk_head);
   Chunk_block(mem) = block;
   Chunk_block_size(mem) = reserved;
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
@@ -549,7 +577,7 @@ char *caml_alloc_for_heap (asize_t request)
 */
 void caml_free_for_heap (char *mem)
 {
-  caml_vas_decommit(Chunk_block(mem), Chunk_block_size(mem));
+  caml_pa_decommit(&vas_allocator, Chunk_block(mem), Chunk_block_size(mem));
 }
 
 /* Take a chunk of memory as argument, which must be the result of a
