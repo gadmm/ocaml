@@ -144,8 +144,8 @@ static int realloc_minor_heap(asize_t bsz, char **out_heap,
   if (Caml_state->young_alloc_start != NULL) {
     caml_mem_decommit((char *)Caml_state->young_alloc_start,
                       Caml_state->young_reserved);
-    // Keep the old mapping reserved. The space reserved for the heap
-    // cannot grow indefinitely.
+    // Keep the old mapping reserved. The space reserved for the minor
+    // heap cannot grow indefinitely.
   }
   *out_heap = new_heap;
   *out_reserved = new_reserved;
