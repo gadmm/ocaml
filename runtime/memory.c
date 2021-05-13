@@ -481,18 +481,28 @@ static void pa_merge(page_allocator *pa, char *block, asize_t size)
   pa_add_free(pa, block, size);
 }
 
+#define MMAP_GROWS_DOWN 1
+
 // returns 1 on success, 0 if out of reserved space
 static int pa_alloc(page_allocator *pa, asize_t request,
                     char **block_out, asize_t *size_out)
 {
+  char *block;
   asize_t available;
   request = round_up(request, PA_page_size(pa));
-  if (pa_find_above_size(pa, request, block_out, &available)) {
-    char *new_block = *block_out + request;
-    pa_remove_free(pa, *block_out, available);
+  if (pa_find_above_size(pa, request, &block, &available)) {
+    char *new_block;
+    pa_remove_free(pa, block, available);
+    if (MMAP_GROWS_DOWN) {
+      new_block = block + available - request;
+    } else {
+      new_block = block;
+      block += request;
+    }
     available -= request;
-    pa_add_free(pa, new_block, available);
+    pa_add_free(pa, block, available);
     *size_out = request;
+    *block_out = new_block;
     return 1;
   } else {
     return 0;
