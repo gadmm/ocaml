@@ -141,16 +141,14 @@ static int realloc_minor_heap(asize_t bsz, char **out_heap,
     return -1;
   if (-1 == caml_mem_commit(new_heap, bsz, &bsz))
     return -1;
-  *out_heap = new_heap;
-  *out_reserved = new_reserved;
   if (Caml_state->young_alloc_start != NULL) {
-    asize_t old_bsz =
-      (char *)Caml_state->young_alloc_end -
-      (char *)Caml_state->young_alloc_start;
-    caml_mem_decommit((char *)Caml_state->young_alloc_start, old_bsz);
+    caml_mem_decommit((char *)Caml_state->young_alloc_start,
+                      Caml_state->young_reserved);
     // Keep the old mapping reserved. The space reserved for the heap
     // cannot grow indefinitely.
   }
+  *out_heap = new_heap;
+  *out_reserved = new_reserved;
   return 0;
 }
 
@@ -168,13 +166,13 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
+  bsz = caml_round_up_to_huge_page(bsz);
   if (Caml_state->young_reserved < bsz) {
     // Reallocate the minor heap
     if (-1 == realloc_minor_heap(bsz, &heap, &Caml_state->young_reserved))
       goto oom;
   } else {
     // Grow in place
-    bsz = caml_round_up_to_huge_page(bsz);
     if (-1 == caml_mem_commit_os(heap, bsz))
       goto oom;
     caml_mem_decommit_os(heap + bsz, Caml_state->young_reserved - bsz);
