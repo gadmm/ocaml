@@ -199,11 +199,12 @@ char * caml_mem_reserve_os(asize_t size)
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return NULL;
   // Prefer contiguous if possible, to avoid holes in the VAS
-  if (block + request_virtual == last_mem)
+  if (block + request_virtual == last_mem) {
     // On Linux, the mmaped area grows downwards
     mem = last_mem - size;
-  else
+  } else {
     mem = (char *) round_up((uintnat)block, Pagetable_entry_size);
+  }
   CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
   /* free beginning */
   mem_unmap_os(block, mem - block);
@@ -343,11 +344,8 @@ typedef struct {
   */
 } page_allocator;
 
-#define PAGE_ALLOCATOR_STATIC_INITIALIZER(page_log) \
+#define PA_STATIC_INITIALIZER(page_log) \
   { page_log, SKIPLIST_STATIC_INITIALIZER, SKIPLIST_STATIC_INITIALIZER }
-
-/*static struct skiplist vas_free_per_address_sk = SKIPLIST_STATIC_INITIALIZER;
-static struct skiplist vas_free_per_size_sk = SKIPLIST_STATIC_INITIALIZER;*/
 
 #define PA_page_size(pa) ((uintnat)1 << pa->page_log)
 #define PA_small_address_log(pa) (Pagetable_significant_bits - pa->page_log)
@@ -500,7 +498,7 @@ CAMLunused_end
 
 /* Static data table */
 
-static page_allocator static_area = PAGE_ALLOCATOR_STATIC_INITIALIZER(Page_log);
+static page_allocator static_area = PA_STATIC_INITIALIZER(Page_log);
 
 int caml_is_in_static_data(void *addr)
 {
@@ -534,8 +532,7 @@ int caml_page_table_add_static_data(void * start, void * end)
 
 /* VAS allocator for the major heap */
 
-static page_allocator heap_allocator =
-  PAGE_ALLOCATOR_STATIC_INITIALIZER(Huge_page_log);
+static page_allocator heap_allocator = PA_STATIC_INITIALIZER(Huge_page_log);
 
 int caml_heap_commit(asize_t request, char **out_block,
                      asize_t *out_size, asize_t *out_reserved)
