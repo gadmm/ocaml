@@ -176,37 +176,6 @@ int caml_page_table_add(int kind, void * start, void * end)
   return ret;
 }
 
-/* Static data table */
-
-static struct skiplist static_area_sk = SKIPLIST_STATIC_INITIALIZER;
-
-int caml_is_in_static_data(void *addr)
-{
-  uintnat data;
-  return caml_skiplist_find(&static_area_sk, (uintnat)addr & Page_mask, &data);
-}
-
-static void static_area_insert(void * start, void * end)
-{
-  uintnat pstart = (uintnat)start & Page_mask;
-  uintnat pend = ((uintnat)end - 1) & Page_mask;
-  uintnat p;
-  // Lots of optimisation opportunities (just record the beginning and
-  // end of the whole segment, record ranges of pages...)
-  for (p = pstart; p <= pend; p += Page_size)
-    caml_skiplist_insert(&static_area_sk, p, 0);
-}
-
-int caml_page_table_add_static_data(void * start, void * end)
-{
-  if (-1 == caml_page_table_add(Unmanaged, start, end))
-    return -1;
-  // TODO: error handling? cf. skiplist
-  static_area_insert(start, end);
-  return 0;
-}
-
-
 /* Reservation, platform-specific */
 
 static void mem_unmap_os(char *block, asize_t size)
@@ -429,8 +398,8 @@ static int pa_find_address(page_allocator *pa, char *block, asize_t *size_out)
   return caml_skiplist_find(&pa->free_per_address_sk, (uintnat)block, size_out);
 }
 
-static int pa_find_below_address(page_allocator *pa, char *addr,
-                                 char **block_out, asize_t *size_out)
+Caml_inline int pa_find_below_address(page_allocator *pa, char *addr,
+                                      char **block_out, asize_t *size_out)
 {
   uintnat address;
   if (caml_skiplist_find_below(&pa->free_per_address_sk, (uintnat)addr,
@@ -509,20 +478,71 @@ static int pa_alloc(page_allocator *pa, asize_t request,
   }
 }
 
-/* fast */
-int caml_pa_contains(page_allocator *pa, char *addr)
+CAMLunused_start
+static void pa_debug(page_allocator *pa)
+CAMLunused_end
+{
+  int num = 0;
+  FOREACH_SKIPLIST_ELEMENT(var, &pa->free_per_address_sk, {
+      char *beg = (char *)var->key;
+      asize_t size = var->data;
+      fprintf(stderr, "(%p, %d pages)", beg, (int)(size / PA_page_size(pa)));
+      if (!caml_skiplist_find(&pa->free_per_size_sk,
+                              pa_size_key(pa, beg, size), &size)
+          && size != var->data)
+        fprintf(stderr, "corrupt ");
+      num++;
+    });
+  FOREACH_SKIPLIST_ELEMENT(var, &pa->free_per_size_sk, { num--; });
+  if (num != 0) fprintf(stderr, "num mismatch");
+  fprintf(stderr, "\n");
+}
+
+/* Static data table */
+
+static page_allocator static_area = PAGE_ALLOCATOR_STATIC_INITIALIZER(Page_log);
+
+int caml_is_in_static_data(void *addr)
 {
   char *block;
   asize_t size;
-  return pa_find_below_address(pa, addr, &block, &size) && addr < block + size;
+  return pa_find_below_address(&static_area, (char *)addr, &block, &size)
+    && (char *)addr < block + size;
 }
 
-int caml_pa_commit(page_allocator *pa, asize_t request,
-                   char **out_block, asize_t *out_size, asize_t *out_reserved)
+static void static_area_insert(void * start, void * end)
+{
+  uintnat pstart = (uintnat)start & Page_mask;
+  uintnat pend = ((uintnat)end - 1) & Page_mask;
+  uintnat addr;
+  for (addr = pstart; addr <= pend; addr += Page_size) {
+    char *p = (char *)addr;
+    if (!caml_is_in_static_data(p))
+      pa_merge(&static_area, p, Page_size);
+  }
+}
+
+int caml_page_table_add_static_data(void * start, void * end)
+{
+  if (-1 == caml_page_table_add(Unmanaged, start, end))
+    return -1;
+  static_area_insert(start, end);
+//  fprintf(stderr, "Static data: ");
+//  pa_debug(&static_area);
+  return 0;
+}
+
+/* VAS allocator for the major heap */
+
+static page_allocator heap_allocator =
+  PAGE_ALLOCATOR_STATIC_INITIALIZER(Huge_page_log);
+
+int caml_heap_commit(asize_t request, char **out_block,
+                     asize_t *out_size, asize_t *out_reserved)
 {
   char *block;
   asize_t reserved;
-  if (!pa_alloc(pa, request, &block, &reserved)) {
+  if (!pa_alloc(&heap_allocator, request, &block, &reserved)) {
     // Out of already-reserved space
     char *mem;
     asize_t new_reserve;
@@ -530,28 +550,29 @@ int caml_pa_commit(page_allocator *pa, asize_t request,
     // TODO: unmap on shutdown
     if (-1 == caml_mem_reserve(request, In_heap, &mem, &new_reserve))
       return -1;
-    pa_merge(pa, mem, new_reserve);
+    pa_merge(&heap_allocator, mem, new_reserve);
     // Now it should succeed
-    pa_alloc(pa, request, &block, &reserved) ?: CAMLassert(0);
+    pa_alloc(&heap_allocator, request, &block, &reserved) ?: CAMLassert(0);
   }
+//  fprintf(stderr, "Heap reserved: ");
+//  pa_debug(&heap_allocator);
   if (-1 == caml_mem_commit(block, request, &request)) goto err;
   *out_block = block;
   *out_size = request;
   *out_reserved = reserved;
   return 0;
 err:
-  pa_merge(pa, block, reserved);
+  pa_merge(&heap_allocator, block, reserved);
   return -1;
 }
 
-void caml_pa_decommit(page_allocator *pa, char * block, asize_t size)
+void caml_heap_decommit(char * block, asize_t size)
 {
   caml_mem_decommit(block, size);
-  pa_merge(pa, block, size);
+  pa_merge(&heap_allocator, block, size);
+//  fprintf(stderr, "Heap reserved: ");
+//  pa_debug(&heap_allocator);
 }
-
-static page_allocator vas_allocator =
-  PAGE_ALLOCATOR_STATIC_INITIALIZER(Huge_page_log);
 
 /* Allocate a block of the requested size, to be passed to
    [caml_add_to_heap] later.
@@ -565,12 +586,10 @@ static page_allocator vas_allocator =
 char *caml_alloc_for_heap (asize_t request)
 {
   // TODO: free on shutdown
-  char *mem;
-  char *block;
+  char *mem, *block;
   asize_t reserved, committed;
   request += sizeof(heap_chunk_head);
-  if (-1 == caml_pa_commit(&vas_allocator, request,
-                           &block, &committed, &reserved))
+  if (-1 == caml_heap_commit(request, &block, &committed, &reserved))
     return NULL;
   mem = block + sizeof(heap_chunk_head);
   Chunk_size(mem) = committed - sizeof(heap_chunk_head);
@@ -587,7 +606,7 @@ char *caml_alloc_for_heap (asize_t request)
 */
 void caml_free_for_heap (char *mem)
 {
-  caml_pa_decommit(&vas_allocator, Chunk_block(mem), Chunk_block_size(mem));
+  caml_heap_decommit(Chunk_block(mem), Chunk_block_size(mem));
 }
 
 /* Take a chunk of memory as argument, which must be the result of a
