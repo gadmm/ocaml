@@ -15,6 +15,8 @@
 
 #define CAML_INTERNALS
 
+#include <sys/file.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 
@@ -708,6 +710,8 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   return work;
 }
 
+static FILE * out_skip_stats = NULL;
+
 static void mark_slice (intnat work)
 {
 #ifdef CAML_INSTR
@@ -788,16 +792,23 @@ static void mark_slice (intnat work)
 #ifndef NO_NAKED_POINTERS
   {
     int i = num_cachelines();
-    fprintf(stderr,
-            "skipped %ld out of %ld words (%f%%) this mark slice; "
-            "with %d distinct cachelines (%f%% unique)\n",
-            count_skipped, count,
-            ((float)count_skipped)/count * 100,
-            i,
-            ((float)i)/count_skipped * 100);
-    fprintf(stderr,
-            "(* OCaml *) let () = x := (%ld, %ld, %d) :: !x\n",
+    int err = 0;
+    if (NULL == out_skip_stats) {
+      char * out_file_name = getenv("OCAMLSKIPLOG");
+      if (NULL == out_file_name) goto out;
+      out_skip_stats = fopen(out_file_name, "a");
+      if (NULL == out_skip_stats) goto out;
+    }
+    while (-1 == (err = flock(fileno(out_skip_stats), LOCK_EX))
+           && errno == EINTR) {}
+    if (err == -1) goto out;
+    fprintf(out_skip_stats, "seen=%ld, skipped=%ld, cachelines=%d\n",
             count, count_skipped, i);
+    fflush(out_skip_stats);
+    flock(fileno(out_skip_stats), LOCK_UN);
+
+  out:
+    /* reset stats */
     count_skipped = 0;
     count = 0;
     caml_skiplist_empty(&skipped_cachelines_sk);
