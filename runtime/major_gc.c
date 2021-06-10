@@ -674,16 +674,6 @@ CAMLnoinline static intnat do_some_marking(intnat work)
         if (!Is_in_heap(v)) {
           count_skipped++;
           caml_skiplist_insert(&skipped_cachelines_sk, CACHELINE(v), 0);
-          if (count % 1000 == 0) {
-            int i = num_cachelines();
-            fprintf(stderr,
-                    "skipped %ld out of %ld (%f%%); "
-                    "%d cachelines (%f%% unique)\n",
-                    count_skipped, count,
-                    ((float)count_skipped)/count * 100,
-                    i,
-                    ((float)i)/count_skipped * 100);
-          }
           continue;
         }
 #endif
@@ -794,6 +784,25 @@ static void mark_slice (intnat work)
   }
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_FIELDS, slice_fields);
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_POINTERS, slice_pointers);
+
+#ifndef NO_NAKED_POINTERS
+  {
+    int i = num_cachelines();
+    fprintf(stderr,
+            "skipped %ld out of %ld words (%f%%) this mark slice; "
+            "with %d distinct cachelines (%f%% unique)\n",
+            count_skipped, count,
+            ((float)count_skipped)/count * 100,
+            i,
+            ((float)i)/count_skipped * 100);
+    fprintf(stderr,
+            "(* OCaml *) let () = x := (%ld, %ld, %d) :: !x\n",
+            count, count_skipped, i);
+    count_skipped = 0;
+    count = 0;
+    caml_skiplist_empty(&skipped_cachelines_sk);
+  }
+#endif
 }
 
 /* Clean ephemerons */
