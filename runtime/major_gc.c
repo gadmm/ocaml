@@ -794,7 +794,7 @@ static void mark_slice (intnat work)
     int i = num_cachelines();
     int err = 0;
     if (NULL == out_skip_stats) {
-      char * out_file_name = getenv("OCAMLSKIPLOG");
+      char * out_file_name = "/tmp/ocamlskip.log";
       if (NULL == out_file_name) goto out;
       out_skip_stats = fopen(out_file_name, "a");
       if (NULL == out_skip_stats) goto out;
