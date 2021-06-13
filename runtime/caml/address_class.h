@@ -149,7 +149,7 @@ inline int caml_classify_address(void *a, int kind)
   uintnat p = Pagetable_entry(a);
   char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
   CAMLassert(kind != 0);
-  if (LIKELY(e & kind)) {
+  if (e & kind) {
     /* no synchronisation required */
     return 1;
   }

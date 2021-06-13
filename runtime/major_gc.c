@@ -576,6 +576,7 @@ static void mark_ephe_aux (struct mark_stack *stk, intnat *work,
 #define Pb_min 64
 #define Pb_mask (Pb_size - 1)
 
+#ifdef NO_NAKED_POINTERS
 Caml_inline void prefetch_block(value v)
 {
   /* Prefetch a block so that scanning it later avoids cache misses.
@@ -603,6 +604,7 @@ Caml_inline uintnat rotate1(uintnat x)
 {
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
+#endif
 
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
@@ -617,11 +619,14 @@ Caml_noinline static intnat do_some_marking
   /* These global values are cached in locals,
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
+
+#ifdef NO_NAKED_POINTERS
   uintnat young_start = (uintnat)Val_hp(Caml_state->young_start);
   uintnat half_young_len =
     ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
+#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -686,9 +691,10 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
+#ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
-#ifndef NO_NAKED_POINTERS
-        if (UNLIKELY(!Is_in_heap(v))) continue;
+#else
+      if (Is_block(v) && Is_in_heap(v)) {
 #endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
