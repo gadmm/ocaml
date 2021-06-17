@@ -8,4 +8,4 @@ This is a branch of OCaml 4.12.0 that:
   `/tmp/ocamlskip.log`.
 
 To analyse the log file there is a script at
-<https://gitlab.com/gadmm/ocaml-large-pages-experiment/skip_count>.
+<https://gitlab.com/gadmm/ocaml-large-pages-experiment/-/tree/master/skip_count>.
