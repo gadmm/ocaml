@@ -58,3 +58,5 @@ val unlock : t -> unit
 
    @before 4.12 {!Sys_error} was not raised when unlocking an unlocked mutex
    or when unlocking a mutex from a different thread. *)
+
+val with_lock : t -> scope:(unit -> 'a) -> 'a
