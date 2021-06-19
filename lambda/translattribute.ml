@@ -185,7 +185,7 @@ let parse_poll_attribute attr =
         ~default:Default_poll
         ~empty:Default_poll
         [
-          "error", Error_poll;
+          "explicit", Explicit_poll;
         ]
         payload
 
@@ -215,18 +215,18 @@ let check_local_inline loc attr =
 
 let check_poll_inline loc attr =
   match attr.poll, attr.inline with
-  | Error_poll, (Always_inline | Hint_inline | Unroll _) ->
+  | Explicit_poll, (Always_inline | Hint_inline | Unroll _) ->
       Location.prerr_warning loc
-        (Warnings.Inlining_impossible "[@error_poll] disables inlining")
+        (Warnings.Inlining_impossible "[@poll explicit] disables inlining")
   | _ ->
       ()
 
 let check_poll_local loc attr =
   match attr.poll, attr.local with
-  | Error_poll, Always_local ->
+  | Explicit_poll, Always_local ->
       Location.prerr_warning loc
         (Warnings.Inlining_impossible
-          "[@error_poll] disables local function optimization")
+          "[@poll explicit] disables local function optimization")
   | _ ->
       ()
 
@@ -290,18 +290,18 @@ let add_poll_attribute expr loc attributes =
   | Lfunction({ attr = { stub = false } as attr } as funct), poll ->
       begin match attr.poll with
       | Default_poll -> ()
-      | Error_poll ->
+      | Explicit_poll ->
           Location.prerr_warning loc
-            (Warnings.Duplicated_attribute "error_poll")
+            (Warnings.Duplicated_attribute "explicit_poll")
       end;
       let attr = { attr with poll } in
       check_poll_inline loc attr;
       check_poll_local loc attr;
       let attr = { attr with inline = Never_inline; local = Never_local } in
       Lfunction { funct with attr }
-  | expr, Error_poll ->
+  | expr, Explicit_poll ->
       Location.prerr_warning loc
-        (Warnings.Misplaced_attribute "error_poll");
+        (Warnings.Misplaced_attribute "explicit_poll");
       expr
 
 (* Get the [@inlined] attribute payload (or default if not present).

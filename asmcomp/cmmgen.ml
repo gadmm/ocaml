@@ -1375,8 +1375,8 @@ let transl_function f =
              fun_args = List.map (fun (id, _) -> (id, typ_val)) f.params;
              fun_body = cmm_body;
              fun_codegen_options;
-             fun_poll_error = f.poll_error;
-             fun_suppress_polls = false;
+             fun_poll_explicit = f.poll_explicit;
+             fun_suppress_polls = f.poll_explicit;
              fun_dbg  = f.dbg}
 
 (* Translate all function definitions *)
@@ -1478,7 +1478,7 @@ let compunit (ulam, preallocated_blocks, constants) =
                            No_CSE;
                          ]
                          else [ Reduce_code_size ];
-                       fun_poll_error = false;
+                       fun_poll_explicit = false;
                        fun_suppress_polls = false;
                        fun_dbg  = Debuginfo.none }] in
   let c2 = transl_clambda_constants constants c1 in

@@ -28,8 +28,7 @@ external unlock: t -> unit = "caml_mutex_unlock"
    - We inline the call to Mutex.unlock to avoid polling in bytecode
      mode.
 *)
-
-let[@poll error] with_lock m ~scope =
+let[@poll explicit] with_lock m ~scope =
   let () = lock m (* BEGIN ATOMIC *) in
   match (* END ATOMIC *) scope () with
   | (* BEGIN ATOMIC *) x -> unlock m ; (* END ATOMIC *) x

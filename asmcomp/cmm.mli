@@ -204,7 +204,7 @@ type fundecl =
     fun_args: (Backend_var.With_provenance.t * machtype) list;
     fun_body: expression;
     fun_codegen_options : codegen_option list;
-    fun_poll_error: bool;
+    fun_poll_explicit: bool;
     fun_suppress_polls: bool;
     fun_dbg : Debuginfo.t;
   }

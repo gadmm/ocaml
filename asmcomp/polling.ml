@@ -186,38 +186,37 @@ let instr_body handler_safe i =
 let contains_any f_any instr =
   let matches = ref [] in
   Mach.instr_iter
-      (fun i -> if f_any i then matches := i :: !matches else ())
-      instr;
+    (fun i -> if f_any i then matches := i :: !matches else ())
+    instr;
   !matches
 
 let contains_poll i =
   let poll_match =
     (fun i -> match i.desc with Iop (Ipoll _) -> true | _ -> false) in
-    match contains_any poll_match i with
-    | [] -> false
-    | _ -> true
+  match contains_any poll_match i with
+  | [] -> false
+  | _ -> true
 
-let contains_poll_alloc_or_calls =
+let contains_poll_or_alloc =
   let f_match i =
-      match i.desc with
-      | Iop(Ipoll _ | Ialloc _ | Icall_ind | Icall_imm _ |
-            Itailcall_ind | Itailcall_imm _ |
-            Iextcall { alloc = true }) -> true
-      | _ -> false
-    in
-    contains_any f_match
+    match i.desc with
+    | Iop(Ipoll _ | Ialloc _) -> true
+    | _ -> false
+  in
+  contains_any f_match
 
 let instrument_fundecl ~future_funcnames:_ (f : Mach.fundecl) : Mach.fundecl =
-  let handler_needs_poll = polled_loops_analysis f.fun_body in
-  let new_body = instr_body handler_needs_poll f.fun_body in
-  if f.fun_poll_error then begin
-    let poll_instrs = contains_poll_alloc_or_calls new_body in
+  if f.fun_poll_explicit then begin
+    let poll_instrs = contains_poll_or_alloc f.fun_body in
     match poll_instrs with
-    | [] -> ()
+    | [] -> f
     | _ -> raise (Error (Poll_error poll_instrs))
-  end;
+  end else begin
+    let handler_needs_poll = polled_loops_analysis f.fun_body in
+    let new_body = instr_body handler_needs_poll f.fun_body in
     let new_contains_calls = f.fun_contains_calls || contains_poll new_body in
     { f with fun_body = new_body; fun_contains_calls = new_contains_calls }
+  end
 
 let requires_prologue_poll ~future_funcnames i =
   potentially_recursive_tailcall ~fwd_func:future_funcnames i
@@ -234,14 +233,14 @@ let instr_type i =
   | _ -> assert(false) (* This should never happen *)
 
 let report_error ppf = function
-| Poll_error instrs ->
-   fprintf ppf
-     "Polling instructions in function annotated with [@poll error]\n";
-   List.iter (fun i ->
-    fprintf ppf "\t%s at " (instr_type i);
-    Location.print_loc ppf (Debuginfo.to_location i.dbg);
-    fprintf ppf "\n"
-   ) instrs
+  | Poll_error instrs ->
+      fprintf ppf
+        "Polling instructions in function annotated with [@poll explicit]\n";
+      List.iter (fun i ->
+        fprintf ppf "\t%s at " (instr_type i);
+        Location.print_loc ppf (Debuginfo.to_location i.dbg);
+        fprintf ppf "\n"
+      ) instrs
 
 let () =
   Location.register_error_of_exn

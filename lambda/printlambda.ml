@@ -469,7 +469,7 @@ let function_attribute ppf
   end;
   begin match poll with
   | Default_poll -> ()
-  | Error_poll -> fprintf ppf "error_poll@ "
+  | Explicit_poll -> fprintf ppf "explicit_poll@ "
   end
 
 let apply_tailcall_attribute ppf = function

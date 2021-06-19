@@ -230,7 +230,7 @@ type local_attribute =
   | Default_local (* [@local maybe] or no [@local] attribute *)
 
 type poll_attribute =
-  | Error_poll (* [@poll error] *)
+  | Explicit_poll (* [@poll explicit] *)
   | Default_poll (* no [@poll] attribute *)
 
 type function_kind = Curried | Tupled
