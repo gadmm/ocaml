@@ -47,10 +47,17 @@ let floatarray_tag dbg = Cconst_int (Obj.double_array_tag, dbg)
 let block_header tag sz =
   Nativeint.add (Nativeint.shift_left (Nativeint.of_int sz) 10)
                 (Nativeint.of_int tag)
-(* Static data corresponding to "value"s must be marked black in case we are
-   in no-naked-pointers mode.  See [caml_darken] and the code below that emits
-   structured constants and static module definitions. *)
-let black_block_header tag sz = Nativeint.logor (block_header tag sz) caml_black
+(* Static data corresponding to "value"s, and young blocks, must be
+   marked black in case we are in no-naked-pointers mode. See
+   [caml_darken] and the code below that emits structured constants
+   and static module definitions. *)
+let blacken hdr = Nativeint.logor hdr caml_black
+let black_block_header tag sz = blacken (block_header tag sz)
+let calloc l dbg = match l with
+  | Cconst_natint(hdr, dbg') :: tl ->
+      Cop(Calloc, Cconst_natint(blacken hdr, dbg') :: tl, dbg)
+  | _ -> assert false
+
 let white_closure_header sz = block_header Obj.closure_tag sz
 let black_closure_header sz = black_block_header Obj.closure_tag sz
 let infix_header ofs = block_header Obj.infix_tag ofs
@@ -556,7 +563,7 @@ let test_bool dbg cmm =
 
 (* Float *)
 
-let box_float dbg c = Cop(Calloc, [alloc_float_header dbg; c], dbg)
+let box_float dbg c = calloc [alloc_float_header dbg; c] dbg
 
 let unbox_float dbg =
   map_tail
@@ -577,7 +584,7 @@ let unbox_float dbg =
 (* Complex *)
 
 let box_complex dbg c_re c_im =
-  Cop(Calloc, [alloc_floatarray_header 2 dbg; c_re; c_im], dbg)
+  calloc [alloc_floatarray_header 2 dbg; c_re; c_im] dbg
 
 let complex_re c dbg = Cop(Cload (Double_u, Immutable), [c], dbg)
 let complex_im c dbg = Cop(Cload (Double_u, Immutable),
@@ -795,7 +802,7 @@ let call_cached_method obj tag cache pos args dbg =
 
 let make_alloc_generic set_fn dbg tag wordsize args =
   if wordsize <= Config.max_young_wosize then
-    Cop(Calloc, Cconst_natint(block_header tag wordsize, dbg) :: args, dbg)
+    calloc (Cconst_natint(block_header tag wordsize, dbg) :: args) dbg
   else begin
     let id = V.create_local "*alloc*" in
     let rec fill_fields idx = function
@@ -1017,9 +1024,9 @@ let box_int_gen dbg (bi : Primitive.boxed_integer) arg =
       else sign_extend_32 dbg arg
     else arg
   in
-  Cop(Calloc, [alloc_header_boxed_int bi dbg;
-               Cconst_symbol(operations_boxed_int bi, dbg);
-               arg'], dbg)
+  calloc [alloc_header_boxed_int bi dbg;
+          Cconst_symbol(operations_boxed_int bi, dbg);
+          arg'] dbg
 
 let split_int64_for_32bit_target arg dbg =
   bind "split_int64" arg (fun arg ->
@@ -1995,24 +2002,24 @@ let rec intermediate_curry_functions arity num =
     Cfunction
      {fun_name = name2;
       fun_args = [VP.create arg, typ_val; VP.create clos, typ_val];
-      fun_body =
-         if arity - num > 2 && arity <= max_arity_optimized then
-           Cop(Calloc,
-               [alloc_closure_header 5 (dbg ());
-                Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1), dbg ());
-                alloc_closure_info ~arity:(arity - num - 1)
-                                   ~startenv:3 (dbg ());
-                Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1) ^ "_app",
-                  dbg ());
-                Cvar arg; Cvar clos],
-               dbg ())
+      fun_body = (
+        let l =
+          if arity - num > 2 && arity <= max_arity_optimized then
+            [alloc_closure_header 5 (dbg ());
+             Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1), dbg ());
+             alloc_closure_info ~arity:(arity - num - 1)
+               ~startenv:3 (dbg ());
+             Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1) ^ "_app",
+                           dbg ());
+             Cvar arg; Cvar clos]
          else
-           Cop(Calloc,
-                [alloc_closure_header 4 (dbg ());
-                 Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1), dbg ());
-                 alloc_closure_info ~arity:1 ~startenv:2 (dbg ());
-                 Cvar arg; Cvar clos],
-                dbg ());
+           [alloc_closure_header 4 (dbg ());
+            Cconst_symbol(name1 ^ "_" ^ Int.to_string (num+1), dbg ());
+            alloc_closure_info ~arity:1 ~startenv:2 (dbg ());
+            Cvar arg; Cvar clos]
+        in
+        calloc l (dbg ())
+      );
       fun_codegen_options = [];
       fun_dbg;
      }
