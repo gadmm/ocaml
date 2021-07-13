@@ -567,6 +567,14 @@ static void mark_ephe_aux (struct mark_stack *stk, intnat *work,
 #define Pb_mask (Pb_size - 1)
 #define Queue_prefetch_distance 4
 
+__attribute__((always_inline))
+static inline void nop(int a) {
+#pragma GCC unroll 9999
+  for (int i = 0; i < (a); i++) {
+    asm volatile("nop");
+  }
+}
+
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
   uintnat pb_enqueued = 0, pb_dequeued = 0;
@@ -574,7 +582,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   value pb[Pb_size];
   uintnat min_pb = Pb_min;
   struct mark_stack stk = *Caml_state->mark_stack;
-
+  nop(20);
   while (1) {
     value *scan, *obj_end, *scan_end;
 
@@ -589,6 +597,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       } else if (Tag_hd(hd) == Infix_tag) {
         block -= Infix_offset_val(block);
         hd = Hd_val(block);
+        nop(9);
       }
 
 #ifdef NO_NAKED_POINTERS
@@ -617,6 +626,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
         uintnat env_offset = Start_env_closinfo(Closinfo_val(block));
         work -= env_offset;
         scan += env_offset;
+        nop(6);
       }
     } else if (work <= 0 || stk.count == 0) {
       if (min_pb > 0) {
@@ -631,6 +641,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       mark_entry m = stk.stack[--stk.count];
       scan = m.start;
       obj_end = m.end;
+      nop(4);
     }
 
     scan_end = obj_end;
@@ -641,7 +652,9 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     for (; scan < scan_end; scan++) {
       value v = *scan;
-      if (Is_block(v)) {
+      int is_block = Is_block(v);
+      nop(14);
+      if (is_block) {
 #ifndef NO_NAKED_POINTERS
         if (!Is_in_heap(v)) continue;
 #endif
@@ -660,17 +673,22 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       mark_entry m = { scan, obj_end };
       work += obj_end - scan;
       caml_prefetch(scan+1);
+      nop(3);
       if (stk.count == stk.size) {
         *Caml_state->mark_stack = stk;
+        nop(10);
         realloc_mark_stack(Caml_state->mark_stack);
+        nop(15);
         stk = *Caml_state->mark_stack;
       }
       stk.stack[stk.count++] = m;
       min_pb = Pb_min;
+      nop(3);
     }
   }
   CAMLassert(pb_enqueued == pb_dequeued);
   *Caml_state->mark_stack = stk;
+  nop(5);
   if (darkened_anything)
     ephe_list_pure = 0;
   return work;
