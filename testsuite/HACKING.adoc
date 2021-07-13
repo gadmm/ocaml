@@ -9,6 +9,9 @@
   link:https://www.gnu.org/software/parallel/[GNU parallel] tool: tests run
   twice as fast with no difference in output order.
 
+`make USE_RUNTIME=d parallel`::
+  idem with the debug runtime
+
 `make all-foo`, `make parallel-foo`::
   runs only the tests in the directories whose name starts with `foo`:
   `parallel-typing`, `all-lib`, etc.
