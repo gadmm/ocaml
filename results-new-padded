@@ -2,7 +2,7 @@ page-table-vas-alloc-fast-nnp
 no-naked-pointers
 (All young blocks have a black header, the test Is_block_and_not_young is replaced by Is_block.)
 With THP
-Padded with nops
+Padded with single-byte nops (not representative)
 
 ../runtime/ocamlrun ../ocamlopt -g -o bench -nostdlib -I ../stdlib -I ../otherlibs/unix -I ../otherlibs/systhreads -thread unix.cmxa threads.cmxa static_strings.cmx markbench.ml
 sh -c "cd .. && git rev-parse HEAD"

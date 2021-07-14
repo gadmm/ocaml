@@ -1,0 +1,229 @@
+page-table-vas-alloc-fast-nnp
+no-naked-pointers
+(All young blocks have a black header, the test Is_block_and_not_young is replaced by Is_block.)
+With THP
+Padded with multi-byte nops
+
+../runtime/ocamlrun ../ocamlopt -g -o bench -nostdlib -I ../stdlib -I ../otherlibs/unix -I ../otherlibs/systhreads -thread unix.cmxa threads.cmxa static_strings.cmx markbench.ml
+sh -c "cd .. && git rev-parse HEAD"
+87ae7d677342eee673a7325bb5f390754ffacba6
+grep "Target: " ../config.log
+Target: x86_64-linux-gnu
+grep "naked_pointers=" ../config.log
+naked_pointers='false'
+sh ./bench_static.sh
+Skip ratio: 0%
+293.1 ms/gc (best of 5)
+292.3 ms/gc (best of 5)
+292.0 ms/gc (best of 5)
+291.8 ms/gc (best of 5)
+292.2 ms/gc (best of 5)
+Skip ratio: 1%
+294.0 ms/gc (best of 5)
+296.6 ms/gc (best of 5)
+296.3 ms/gc (best of 5)
+294.6 ms/gc (best of 5)
+295.0 ms/gc (best of 5)
+Skip ratio: 2%
+294.5 ms/gc (best of 5)
+294.7 ms/gc (best of 5)
+295.6 ms/gc (best of 5)
+296.7 ms/gc (best of 5)
+294.9 ms/gc (best of 5)
+Skip ratio: 5%
+297.6 ms/gc (best of 5)
+297.6 ms/gc (best of 5)
+297.4 ms/gc (best of 5)
+297.3 ms/gc (best of 5)
+297.7 ms/gc (best of 5)
+Skip ratio: 10%
+301.7 ms/gc (best of 5)
+303.5 ms/gc (best of 5)
+301.4 ms/gc (best of 5)
+302.8 ms/gc (best of 5)
+303.6 ms/gc (best of 5)
+Skip ratio: 20%
+312.1 ms/gc (best of 5)
+311.5 ms/gc (best of 5)
+312.9 ms/gc (best of 5)
+313.3 ms/gc (best of 5)
+312.0 ms/gc (best of 5)
+Skip ratio: 40%
+363.9 ms/gc (best of 5)
+366.7 ms/gc (best of 5)
+362.8 ms/gc (best of 5)
+364.4 ms/gc (best of 5)
+364.6 ms/gc (best of 5)
+
+
+Dump of assembler code for function do_some_marking:
+   0x0000000000160d80 <+0>:	push   r15
+   0x0000000000160d82 <+2>:	push   r14
+   0x0000000000160d84 <+4>:	push   r13
+   0x0000000000160d86 <+6>:	mov    r13,rdi
+   0x0000000000160d89 <+9>:	push   r12
+   0x0000000000160d8b <+11>:	push   rbp
+   0x0000000000160d8c <+12>:	push   rbx
+   0x0000000000160d8d <+13>:	sub    rsp,0x818
+   0x0000000000160d94 <+20>:	mov    rax,QWORD PTR fs:0x28
+   0x0000000000160d9d <+29>:	mov    QWORD PTR [rsp+0x808],rax
+   0x0000000000160da5 <+37>:	mov    rax,QWORD PTR [rip+0x12d734]        # 0x28e4e0 <Caml_state>
+   0x0000000000160dac <+44>:	mov    rax,QWORD PTR [rax+0x70]
+   0x0000000000160db0 <+48>:	mov    rdi,QWORD PTR [rax]
+   0x0000000000160db3 <+51>:	mov    rcx,QWORD PTR [rax+0x8]
+   0x0000000000160db7 <+55>:	mov    r8,QWORD PTR [rax+0x10]
+   0x0000000000160dbb <+59>:	data16 nop WORD PTR cs:[rax+rax*1+0x0]
+   0x0000000000160dc6 <+70>:	nop    WORD PTR [rax+rax*1+0x0]
+   0x0000000000160dcf <+79>:	mov    esi,0x40
+   0x0000000000160dd4 <+84>:	xor    r14d,r14d
+   0x0000000000160dd7 <+87>:	xor    r12d,r12d
+   0x0000000000160dda <+90>:	xor    ebp,ebp
+   0x0000000000160ddc <+92>:	lea    rax,[r12+rsi*1]
+   0x0000000000160de0 <+96>:	cmp    rax,rbp
+   0x0000000000160de3 <+99>:	jae    0x160e40 <do_some_marking+192>
+   0x0000000000160de5 <+101>:	lea    r9,[r12+0x1]
+   0x0000000000160dea <+106>:	movzx  r12d,r12b
+   0x0000000000160dee <+110>:	mov    rdx,QWORD PTR [rsp+r12*8]
+   0x0000000000160df2 <+114>:	mov    rax,QWORD PTR [rdx-0x8]
+   0x0000000000160df6 <+118>:	cmp    al,0xf9
+   0x0000000000160df8 <+120>:	je     0x160f80 <do_some_marking+512>
+   0x0000000000160dfe <+126>:	mov    r12,r9
+   0x0000000000160e01 <+129>:	test   ah,0x3
+   0x0000000000160e04 <+132>:	jne    0x160ddc <do_some_marking+92>
+   0x0000000000160e06 <+134>:	cs cs cs cs or ah,0x3
+   0x0000000000160e0d <+141>:	sub    r13,0x1
+   0x0000000000160e11 <+145>:	mov    r9,rax
+   0x0000000000160e14 <+148>:	mov    QWORD PTR [rdx-0x8],rax
+   0x0000000000160e18 <+152>:	movzx  r10d,al
+
+   0x0000000000160e1c <+156>:	shr    r9,0xa
+   0x0000000000160e20 <+160>:	cmp    al,0xfa
+   0x0000000000160e22 <+162>:	jbe    0x160eb0 <do_some_marking+304>
+   0x0000000000160e28 <+168>:	lea    rax,[r12+rsi*1]
+   0x0000000000160e2c <+172>:	sub    r13,r9
+   0x0000000000160e2f <+175>:	mov    r14d,0x1
+   0x0000000000160e35 <+181>:	cmp    rax,rbp
+   0x0000000000160e38 <+184>:	jb     0x160de5 <do_some_marking+101>
+   0x0000000000160e3a <+186>:	nop    WORD PTR [rax+rax*1+0x0]
+   0x0000000000160e40 <+192>:	test   rcx,rcx
+   0x0000000000160e43 <+195>:	je     0x160e4e <do_some_marking+206>
+   0x0000000000160e45 <+197>:	test   r13,r13
+   0x0000000000160e48 <+200>:	jg     0x160f98 <do_some_marking+536>
+   0x0000000000160e4e <+206>:	test   rsi,rsi
+   0x0000000000160e51 <+209>:	jne    0x160f70 <do_some_marking+496>
+   0x0000000000160e57 <+215>:	mov    rax,QWORD PTR [rip+0x12d682]        # 0x28e4e0 <Caml_state>
+   0x0000000000160e5e <+222>:	mov    rax,QWORD PTR [rax+0x70]
+   0x0000000000160e62 <+226>:	mov    QWORD PTR [rax],rdi
+   0x0000000000160e65 <+229>:	mov    QWORD PTR [rax+0x8],rcx
+   0x0000000000160e69 <+233>:	mov    QWORD PTR [rax+0x10],r8
+   0x0000000000160e6d <+237>:	nop    DWORD PTR [rax+rax*1+0x0]
+   0x0000000000160e72 <+242>:	test   r14d,r14d
+   0x0000000000160e75 <+245>:	je     0x160e81 <do_some_marking+257>
+   0x0000000000160e77 <+247>:	mov    DWORD PTR [rip+0x129137],0x0        # 0x289fb8 <ephe_list_pure>
+   0x0000000000160e81 <+257>:	mov    rax,QWORD PTR [rsp+0x808]
+   0x0000000000160e89 <+265>:	sub    rax,QWORD PTR fs:0x28
+   0x0000000000160e92 <+274>:	jne    0x16102a <do_some_marking+682>
+   0x0000000000160e98 <+280>:	add    rsp,0x818
+   0x0000000000160e9f <+287>:	mov    rax,r13
+   0x0000000000160ea2 <+290>:	pop    rbx
+   0x0000000000160ea3 <+291>:	pop    rbp
+   0x0000000000160ea4 <+292>:	pop    r12
+   0x0000000000160ea6 <+294>:	pop    r13
+   0x0000000000160ea8 <+296>:	pop    r14
+   0x0000000000160eaa <+298>:	pop    r15
+   0x0000000000160eac <+300>:	ret    
+   0x0000000000160ead <+301>:	nop    DWORD PTR [rax]
+   0x0000000000160eb0 <+304>:	cs cs cs mov rbx,rdx
+   0x0000000000160eb6 <+310>:	lea    r15,[rdx+r9*8]
+
+   0x0000000000160eba <+314>:	mov    r14d,0x1
+   0x0000000000160ec0 <+320>:	cmp    r10d,0xf7
+   0x0000000000160ec7 <+327>:	je     0x160fb8 <do_some_marking+568>
+   0x0000000000160ecd <+333>:	mov    rax,r15
+   0x0000000000160ed0 <+336>:	lea    r10,[r12+0x100]
+   0x0000000000160ed8 <+344>:	sub    rax,rbx
+   0x0000000000160edb <+347>:	sar    rax,0x3
+   0x0000000000160edf <+351>:	sub    r13,rax
+   0x0000000000160ee2 <+354>:	lea    rdx,[r15+r13*8]
+   0x0000000000160ee6 <+358>:	cmovns rdx,r15
+   0x0000000000160eea <+362>:	cmp    rbx,rdx
+   0x0000000000160eed <+365>:	jae    0x160f27 <do_some_marking+423>
+   0x0000000000160eef <+367>:	nop
+   0x0000000000160ef0 <+368>:	mov    rax,QWORD PTR [rbx]
+   0x0000000000160ef3 <+371>:	data16 nop WORD PTR cs:[rax+rax*1+0x0]
+   0x0000000000160efe <+382>:	nop    DWORD PTR [rax]
+   0x0000000000160f01 <+385>:	test   al,0x1
+   0x0000000000160f03 <+387>:	jne    0x160f1e <do_some_marking+414>
+   0x0000000000160f05 <+389>:	cmp    r10,rbp
+   0x0000000000160f08 <+392>:	je     0x160f27 <do_some_marking+423>
+   0x0000000000160f0a <+394>:	movzx  r9d,bpl
+   0x0000000000160f0e <+398>:	prefetcht0 BYTE PTR [rax-0x8]
+   0x0000000000160f12 <+402>:	prefetcht0 BYTE PTR [rax+0x18]
+   0x0000000000160f16 <+406>:	add    rbp,0x1
+   0x0000000000160f1a <+410>:	mov    QWORD PTR [rsp+r9*8],rax
+   0x0000000000160f1e <+414>:	add    rbx,0x8
+   0x0000000000160f22 <+418>:	cmp    rbx,rdx
+   0x0000000000160f25 <+421>:	jb     0x160ef0 <do_some_marking+368>
+   0x0000000000160f27 <+423>:	cmp    r15,rbx
+   0x0000000000160f2a <+426>:	jbe    0x160ddc <do_some_marking+92>
+   0x0000000000160f30 <+432>:	mov    rax,r15
+   0x0000000000160f33 <+435>:	prefetcht0 BYTE PTR [rbx+0x8]
+   0x0000000000160f37 <+439>:	sub    rax,rbx
+   0x0000000000160f3a <+442>:	sar    rax,0x3
+   0x0000000000160f3e <+446>:	add    r13,rax
+   0x0000000000160f41 <+449>:	nop    DWORD PTR [rax]
+   0x0000000000160f44 <+452>:	cmp    rcx,r8
+   0x0000000000160f47 <+455>:	je     0x160fd0 <do_some_marking+592>
+   0x0000000000160f4d <+461>:	lea    rax,[rcx+0x1]
+
+   0x0000000000160f51 <+465>:	shl    rcx,0x4
+   0x0000000000160f55 <+469>:	add    rcx,rdi
+   0x0000000000160f58 <+472>:	mov    QWORD PTR [rcx],rbx
+   0x0000000000160f5b <+475>:	mov    QWORD PTR [rcx+0x8],r15
+   0x0000000000160f5f <+479>:	nop    DWORD PTR [rax]
+   0x0000000000160f62 <+482>:	mov    esi,0x40
+   0x0000000000160f67 <+487>:	mov    rcx,rax
+   0x0000000000160f6a <+490>:	jmp    0x160ddc <do_some_marking+92>
+   0x0000000000160f6f <+495>:	nop
+   0x0000000000160f70 <+496>:	xor    esi,esi
+   0x0000000000160f72 <+498>:	jmp    0x160ddc <do_some_marking+92>
+   0x0000000000160f77 <+503>:	nop    WORD PTR [rax+rax*1+0x0]
+   0x0000000000160f80 <+512>:	shr    rax,0xa
+   0x0000000000160f84 <+516>:	shl    rax,0x3
+   0x0000000000160f88 <+520>:	sub    rdx,rax
+   0x0000000000160f8b <+523>:	mov    rax,QWORD PTR [rdx-0x8]
+   0x0000000000160f8f <+527>:	jmp    0x160dfe <do_some_marking+126>
+   0x0000000000160f94 <+532>:	nop    DWORD PTR [rax+0x0]
+   0x0000000000160f98 <+536>:	sub    rcx,0x1
+   0x0000000000160f9c <+540>:	mov    rax,rcx
+   0x0000000000160f9f <+543>:	shl    rax,0x4
+   0x0000000000160fa3 <+547>:	add    rax,rdi
+   0x0000000000160fa6 <+550>:	mov    rbx,QWORD PTR [rax]
+   0x0000000000160fa9 <+553>:	mov    r15,QWORD PTR [rax+0x8]
+   0x0000000000160fad <+557>:	jmp    0x160ecd <do_some_marking+333>
+   0x0000000000160fb2 <+562>:	nop    WORD PTR [rax+rax*1+0x0]
+   0x0000000000160fb8 <+568>:	mov    rax,QWORD PTR [rdx+0x8]
+   0x0000000000160fbc <+572>:	shl    rax,0x8
+   0x0000000000160fc0 <+576>:	shr    rax,0x9
+   0x0000000000160fc4 <+580>:	sub    r13,rax
+   0x0000000000160fc7 <+583>:	lea    rbx,[rdx+rax*8]
+   0x0000000000160fcb <+587>:	jmp    0x160ecd <do_some_marking+333>
+   0x0000000000160fd0 <+592>:	mov    rax,QWORD PTR [rip+0x12d509]        # 0x28e4e0 <Caml_state>
+   0x0000000000160fd7 <+599>:	mov    rax,QWORD PTR [rax+0x70]
+   0x0000000000160fdb <+603>:	mov    QWORD PTR [rax],rdi
+   0x0000000000160fde <+606>:	mov    QWORD PTR [rax+0x8],rcx
+   0x0000000000160fe2 <+610>:	mov    QWORD PTR [rax+0x10],rcx
+   0x0000000000160fe6 <+614>:	nop    WORD PTR cs:[rax+rax*1+0x0]
+   0x0000000000160ff0 <+624>:	mov    rax,QWORD PTR [rip+0x12d4e9]        # 0x28e4e0 <Caml_state>
+
+   0x0000000000160ff7 <+631>:	mov    rdi,QWORD PTR [rax+0x70]
+   0x0000000000160ffb <+635>:	call   0x160b60 <realloc_mark_stack>
+   0x0000000000161000 <+640>:	data16 nop WORD PTR cs:[rax+rax*1+0x0]
+   0x000000000016100b <+651>:	nop    DWORD PTR [rax+0x0]
+   0x000000000016100f <+655>:	mov    rax,QWORD PTR [rip+0x12d4ca]        # 0x28e4e0 <Caml_state>
+   0x0000000000161016 <+662>:	mov    rax,QWORD PTR [rax+0x70]
+   0x000000000016101a <+666>:	mov    rdi,QWORD PTR [rax]
+   0x000000000016101d <+669>:	mov    rcx,QWORD PTR [rax+0x8]
+   0x0000000000161021 <+673>:	mov    r8,QWORD PTR [rax+0x10]
+   0x0000000000161025 <+677>:	jmp    0x160f4d <do_some_marking+461>
+   0x000000000016102a <+682>:	call   0xf8a20 <__stack_chk_fail@plt>
