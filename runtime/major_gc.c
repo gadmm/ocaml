@@ -661,7 +661,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 #else
       if (Is_block(v) && Is_in_heap(v)) {
 #endif
-        if (pb_enqueued == pb_dequeued + Pb_size) {
+        if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */
         }
         caml_prefetch(Hp_val(v));
@@ -670,7 +670,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       }
     }
 
-    if (scan < obj_end) {
+    if (UNLIKELY(scan < obj_end)) {
       /* Didn't finish scanning this object, either because work <= 0,
          or the prefetch buffer filled up. Leave the rest on the stack. */
       mark_entry m = { scan, obj_end };

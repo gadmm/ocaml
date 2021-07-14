@@ -119,13 +119,26 @@ CAMLextern uintnat caml_real_page_size;
 
 #ifdef ARCH_SIXTYFOUR
 
-// can support 57 bits one day
-#define Pagetable_significant_bits 48
+// it is enough to support only non-kernel addresses for realistic
+// usecases
+#define PAGETABLE_ALLOW_KERNEL_ADDRESSES 1
+
 // TODO: might be better at 1GB (L4 idx + L3 idx)
 #define Pagetable_entry_log 28 // 256MB
+
+#if PAGETABLE_ALLOW_KERNEL_ADDRESSES
+// can support 57 bits one day
+#define Pagetable_significant_bits 48
 #define Pagetable_entry(p)                                            \
   (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
    >> Pagetable_entry_log)
+#else
+// one less instruction
+#define Pagetable_significant_bits 47
+#define Pagetable_entry(p) \
+  (CAMLassert(0 == ((uintnat)(p) >> Pagetable_significant_bits)), \
+   (uintnat)(p) >> Pagetable_entry_log)
+#endif
 
 #else
 
@@ -144,11 +157,18 @@ CAMLextern atomic_char *caml_heap_table;
 
 int caml_is_in_static_data(void *a);
 
+__attribute__((const))
 inline int caml_classify_address(void *a, int kind)
 {
   uintnat p = Pagetable_entry(a);
   char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
   CAMLassert(kind != 0);
+  /* The following is equivalent to
+
+       if (LIKELY(e != 0)) return e & kind;
+
+     but it is more efficient in cases where e & kind is expected to
+     most often succeed. */
   if (e & kind) {
     /* no synchronisation required */
     return 1;
