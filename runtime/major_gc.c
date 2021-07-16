@@ -654,12 +654,16 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       scan_end += work;
     }
 
+    {
+#ifndef NO_NAKED_POINTERS
+      atomic_char *heap_table = caml_heap_table;
+#endif
     for (; scan < scan_end; scan++) {
       value v = *scan;
 #ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
 #else
-      if (Is_block(v) && Is_in_heap(v)) {
+      if (Is_block(v) && caml_likely_is_in_heap(heap_table,v)) {
 #endif
         if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */
@@ -668,6 +672,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
         caml_prefetch(&Field(v, Queue_prefetch_distance - 1));
         pb[(pb_enqueued++) & Pb_mask] = v;
       }
+    }
     }
 
     if (UNLIKELY(scan < obj_end)) {
