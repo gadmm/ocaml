@@ -665,14 +665,17 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       // 1 : strongly taken
       // 0 : weakly taken
       // -1 : weakly not taken
-      // - 2 : strongly not taken
-      static int prediction = 0;
+      // -2 : strongly not taken
+      static int predictions[256] = { 0 };
+      static char history = 0;
+      int *prediction = &predictions[history & 255];
       count++;
       if (b) count_immediates++;
-      if (b != (prediction >= 0)) mispredicted++;
-      if (prediction == 0 || prediction == -1) prediction = 3*b-2;
-      if (b && (prediction == -2)) prediction = -1;
-      if (!b && (prediction == 1)) prediction = 0;
+      if (b != (*prediction >= 0)) mispredicted++;
+      if (*prediction == 0 || *prediction == -1) *prediction = 3*b-2;
+      if (b && (*prediction == -2)) *prediction = -1;
+      if (!b && (*prediction == 1)) *prediction = 0;
+      history = (history << 1) + b;
 #endif
       if (Is_block_and_not_young(v)) {
 #ifndef NO_NAKED_POINTERS
@@ -800,7 +803,8 @@ static void mark_slice (intnat work)
     while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
            && errno == EINTR) {}
     if (err == -1) goto out;
-    fprintf(out_immediates_stats, "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%)\n",
+    fprintf(out_immediates_stats,
+            "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%)\n",
             count, count_immediates, (count_immediates * 100) / (count + 1),
             mispredicted, (mispredicted * 100) / (count + 1));
     fflush(out_immediates_stats);
