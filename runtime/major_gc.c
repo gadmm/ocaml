@@ -567,13 +567,6 @@ static void mark_ephe_aux (struct mark_stack *stk, intnat *work,
 #define Pb_mask (Pb_size - 1)
 #define Queue_prefetch_distance 4
 
-#ifdef NO_NAKED_POINTERS
-static uintnat rotate1(uintnat x)
-{
-  return (x << ((sizeof x)*8 - 1)) | (x >> 1);
-}
-#endif
-
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
   uintnat pb_enqueued = 0, pb_dequeued = 0;
@@ -583,12 +576,17 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   struct mark_stack stk = *Caml_state->mark_stack;
 
 #ifdef NO_NAKED_POINTERS
-  uintnat young_start = (uintnat)Caml_state->young_alloc_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
-                            - (uintnat)Caml_state->young_alloc_start) >> 1;
-#define Is_block_and_not_young(v) \
-  (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
+      uintnat young_start = (uintnat)(Caml_state->young_alloc_start + 1);
+      uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
+#define Is_not_young(v) (((uintnat)v - young_start) > young_len)
 #endif
+
+  // alignment impact (clang -mbranches-within-32B-boundaries -march=skylake)
+/*  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");*/
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -661,7 +659,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
     for (; scan < scan_end; scan++) {
       value v = *scan;
 #ifdef NO_NAKED_POINTERS
-      if (Is_block_and_not_young(v)) {
+      if (Is_block(v) && LIKELY(Is_not_young(v))) {
 #else
       if (Is_block(v) && caml_likely_is_in_heap(heap_table,v)) {
 #endif
