@@ -579,14 +579,14 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       uintnat young_start = (uintnat)(Caml_state->young_alloc_start + 1);
       uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
 #define Is_not_young(v) (((uintnat)v - young_start) > young_len)
-#endif
-
+#ifdef __clang__
   // alignment impact (clang -mbranches-within-32B-boundaries -march=skylake)
-/*  asm("NOPL (%rax)");
   asm("NOPL (%rax)");
   asm("NOPL (%rax)");
   asm("NOPL (%rax)");
-  asm("NOPL (%rax)");*/
+  asm("NOPL (%rax)");
+#endif
+#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
