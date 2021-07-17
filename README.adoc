@@ -1,11 +1,7 @@
 This is a branch of OCaml 4.12.0 that:
 - Uses prefetching during marking and sweeping (courtesy of Stephen
   Dolan)
-- Records statistic about static data usage during marking: for each
-  mark slice, the number of words seen, the number of words skipped
-  thanks to the page table, and the number of unique distinct
-  cachelines skipped. These statistics are appended to the file
-  `/tmp/ocamlskip.log`.
-
-To analyse the log file there is a script at
-<https://gitlab.com/gadmm/ocaml-large-pages-experiment/-/tree/master/skip_count>.
+- Records statistic about immediates during marking: for each mark
+  slice, the number of words seen, the number of immediates seen, and
+  the number immediates that were mispredicted using a 2-bit counter.
+  These statistics are appended to the file `/tmp/ocamlimmediates.log`.

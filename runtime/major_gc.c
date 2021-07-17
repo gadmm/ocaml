@@ -577,18 +577,8 @@ static uintnat rotate1(uintnat x)
 }
 
 static uintnat count = 0;
-static uintnat count_skipped = 0;
-static struct skiplist skipped_cachelines_sk = SKIPLIST_STATIC_INITIALIZER;
-#define CACHELINE_LOG 6
-#define CACHELINE(p) ((uintnat)p >> CACHELINE_LOG)
-static int num_cachelines()
-{
-  int i = 0;
-  FOREACH_SKIPLIST_ELEMENT(v,&skipped_cachelines_sk, {
-      i++;
-    });
-  return i;
-}
+static uintnat count_immediates = 0;
+static uintnat mispredicted = 0;
 
 CAMLnoinline static intnat do_some_marking(intnat work)
 {
@@ -670,14 +660,23 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     for (; scan < scan_end; scan++) {
       value v = *scan;
+#ifndef NO_NAKED_POINTER
+      int b = Is_block(v);
+      // 1 : strongly taken
+      // 0 : weakly taken
+      // -1 : weakly not taken
+      // - 2 : strongly not taken
+      static int prediction = 0;
+      count++;
+      if (b) count_immediates++;
+      if (b != (prediction >= 0)) mispredicted++;
+      if (prediction == 0 || prediction == -1) prediction = 3*b-2;
+      if (b && (prediction == -2)) prediction = -1;
+      if (!b && (prediction == 1)) prediction = 0;
+#endif
       if (Is_block_and_not_young(v)) {
-        count++;
 #ifndef NO_NAKED_POINTERS
-        if (!Is_in_heap(v)) {
-          count_skipped++;
-          caml_skiplist_insert(&skipped_cachelines_sk, CACHELINE(v), 0);
-          continue;
-        }
+        if (!Is_in_heap(v)) continue;
 #endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
@@ -710,7 +709,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   return work;
 }
 
-static FILE * out_skip_stats = NULL;
+static FILE * out_immediates_stats = NULL;
 
 static void mark_slice (intnat work)
 {
@@ -791,27 +790,27 @@ static void mark_slice (intnat work)
 
 #ifndef NO_NAKED_POINTERS
   {
-    int i = num_cachelines();
     int err = 0;
-    if (NULL == out_skip_stats) {
-      char * out_file_name = "/tmp/ocamlskip.log";
+    if (NULL == out_immediates_stats) {
+      char * out_file_name = "/tmp/ocamlimmediates.log";
       if (NULL == out_file_name) goto out;
-      out_skip_stats = fopen(out_file_name, "a");
-      if (NULL == out_skip_stats) goto out;
+      out_immediates_stats = fopen(out_file_name, "a");
+      if (NULL == out_immediates_stats) goto out;
     }
-    while (-1 == (err = flock(fileno(out_skip_stats), LOCK_EX))
+    while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
            && errno == EINTR) {}
     if (err == -1) goto out;
-    fprintf(out_skip_stats, "seen=%ld, skipped=%ld, cachelines=%d\n",
-            count, count_skipped, i);
-    fflush(out_skip_stats);
-    flock(fileno(out_skip_stats), LOCK_UN);
+    fprintf(out_immediates_stats, "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%)\n",
+            count, count_immediates, (count_immediates * 100) / (count + 1),
+            mispredicted, (mispredicted * 100) / (count + 1));
+    fflush(out_immediates_stats);
+    flock(fileno(out_immediates_stats), LOCK_UN);
 
   out:
     /* reset stats */
-    count_skipped = 0;
+    count_immediates = 0;
     count = 0;
-    caml_skiplist_empty(&skipped_cachelines_sk);
+    mispredicted = 0;
   }
 #endif
 }
