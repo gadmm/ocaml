@@ -589,7 +589,22 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
 #endif
-
+/*
+#ifdef __clang__
+  // alignment impact (clang -mbranches-within-32B-boundaries -march=skylake)
+  //asm(".nops 8"); // not in clang
+#ifdef NO_NAKED_POINTERS
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+#else
+  // align for clang
+  asm("NOPL (%rax)");
+  asm("NOPL (%rax)");
+#endif
+#endif // __clang__
+*/
   while (1) {
     value *scan, *obj_end, *scan_end;
 
