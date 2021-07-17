@@ -661,21 +661,30 @@ CAMLnoinline static intnat do_some_marking(intnat work)
     for (; scan < scan_end; scan++) {
       value v = *scan;
 #ifndef NO_NAKED_POINTER
+#define H 14
       int b = Is_block(v);
       // 1 : strongly taken
       // 0 : weakly taken
       // -1 : weakly not taken
       // -2 : strongly not taken
-      static int predictions[256] = { 0 };
-      static char history = 0;
-      int *prediction = &predictions[history & 255];
+      static int predictions[1 << H] = { -1 };
+      static unsigned int history = 0;
+      int *prediction = &predictions[history];
       count++;
       if (b) count_immediates++;
       if (b != (*prediction >= 0)) mispredicted++;
-      if (*prediction == 0 || *prediction == -1) *prediction = 3*b-2;
-      if (b && (*prediction == -2)) *prediction = -1;
-      if (!b && (*prediction == 1)) *prediction = 0;
-      history = (history << 1) + b;
+      if (0) {
+        // hysteresis
+        if (*prediction == 0 || *prediction == -1) *prediction = 3*b-2;
+        if (b && (*prediction == -2)) *prediction = -1;
+        if (!b && (*prediction == 1)) *prediction = 0;
+      } else {
+        // saturating
+        *prediction += 2*b-1;
+        if (*prediction < -2) *prediction = -2;
+        if (*prediction > 1) *prediction = 1;
+      }
+      history = ((history << 1) + b) & ((1 << H) - 1);
 #endif
       if (Is_block_and_not_young(v)) {
 #ifndef NO_NAKED_POINTERS
