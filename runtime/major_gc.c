@@ -579,13 +579,13 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       uintnat young_start = (uintnat)(Caml_state->young_alloc_start + 1);
       uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
 #define Is_not_young(v) (((uintnat)v - young_start) > young_len)
+/*
 #ifdef __clang__
-  // alignment impact (clang -mbranches-within-32B-boundaries -march=skylake)
+  // alignment impact (clang -mbranches-within-32B-boundaries)
   asm("NOPL (%rax)");
-  asm("NOPL (%rax)");
-  asm("NOPL (%rax)");
-  asm("NOPL (%rax)");
+  asm("NOP");
 #endif
+*/
 #endif
 
   while (1) {
@@ -648,7 +648,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     scan_end = obj_end;
     work -= obj_end - scan;
-    if (work < 0) {
+    if (UNLIKELY(work < 0)) {
       scan_end += work;
     }
 
