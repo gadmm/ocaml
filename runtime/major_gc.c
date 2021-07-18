@@ -591,17 +591,15 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 #endif
 /*
 #ifdef __clang__
-  // alignment impact (clang -mbranches-within-32B-boundaries -march=skylake)
+  // alignment impact (clang -mbranches-within-32B-boundaries)
   //asm(".nops 8"); // not in clang
 #ifdef NO_NAKED_POINTERS
   asm("NOPL (%rax)");
   asm("NOPL (%rax)");
   asm("NOPL (%rax)");
-  asm("NOPL (%rax)");
 #else
   // align for clang
-  asm("NOPL (%rax)");
-  asm("NOPL (%rax)");
+   asm("NOP");
 #endif
 #endif // __clang__
 */
@@ -665,7 +663,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     scan_end = obj_end;
     work -= obj_end - scan;
-    if (work < 0) {
+    if (UNLIKELY(work < 0)) {
       scan_end += work;
     }
 
