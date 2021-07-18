@@ -584,6 +584,8 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   // alignment impact (clang -mbranches-within-32B-boundaries)
   asm("NOPL (%rax)");
   asm("NOP");
+#else
+  asm(".nops 8");
 #endif
 */
 #endif
