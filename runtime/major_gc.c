@@ -606,7 +606,12 @@ Caml_inline uintnat rotate1(uintnat x)
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
 
-Caml_noinline static intnat do_some_marking(intnat work)
+Caml_noinline static intnat do_some_marking
+#ifndef CAML_INSTR
+  (intnat work)
+#else
+  (intnat work, int* slice_fields, int* slice_pointers)
+#endif
 {
   uintnat pb_enqueued = 0, pb_dequeued = 0;
   int darkened_anything = 0;
@@ -621,9 +626,8 @@ Caml_noinline static intnat do_some_marking(intnat work)
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
 #ifdef NO_NAKED_POINTERS
   #define Is_major_block(v) Is_block_and_not_young(v)
-  //#define Is_major_block(v) (Is_block(v) && !Is_young(v))
 #else
-#define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
+  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
 #endif
 
   while (1) {
@@ -643,10 +647,7 @@ Caml_noinline static intnat do_some_marking(intnat work)
       value block = pb[(pb_dequeued++) & Pb_mask];
       header_t hd = Hd_val(block);
 
-      /* FIXME: Forward_tag */
-      if (Tag_hd(hd) == Forward_tag) {
-
-      } else if (Tag_hd(hd) == Infix_tag) {
+      if (Tag_hd(hd) == Infix_tag) {
         block -= Infix_offset_val(block);
         hd = Hd_val(block);
       }
@@ -660,11 +661,10 @@ Caml_noinline static intnat do_some_marking(intnat work)
         /* Already black, nothing to do */
         continue;
       }
-      // FIXME work accounting
       hd = Blackhd_hd (hd);
       Hd_val (block) = hd;
       darkened_anything = 1;
-      work--; // header word
+      work--; /* header word */
       if (Tag_hd (hd) >= No_scan_tag) {
         /* Nothing to scan here */
         work -= Wosize_hd (hd);
@@ -692,7 +692,9 @@ Caml_noinline static intnat do_some_marking(intnat work)
 
     for (; scan < scan_end; scan++) {
       value v = *scan;
+      CAML_EVENTLOG_DO({ (*slice_fields) ++; });
       if (Is_major_block(v)) {
+        CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
         }
@@ -712,6 +714,11 @@ Caml_noinline static intnat do_some_marking(intnat work)
         realloc_mark_stack(Caml_state->mark_stack);
         stk = *Caml_state->mark_stack;
       }
+      CAML_EVENTLOG_DO({
+        if (work <= 0 && pb_enqueued == pb_dequeued) {
+          CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_REMAIN, obj_end - scan);
+        }
+      });
       stk.stack[stk.count++] = m;
     }
   }
@@ -734,7 +741,11 @@ static void mark_slice (intnat work)
   caml_gc_message (0x40, "Subphase = %d\n", caml_gc_subphase);
 
   while (1){
+#ifndef CAML_INSTR
     work = do_some_marking(work);
+#else
+    work = do_some_marking(work, &slice_fields, &slice_pointers);
+#endif
 
     if (work <= 0)
       break;
