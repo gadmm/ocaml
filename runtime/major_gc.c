@@ -577,6 +577,7 @@ static uintnat rotate1(uintnat x)
 }
 
 static uintnat count = 0;
+static uintnat count_young = 0;
 static uintnat count_immediates = 0;
 static uintnat mispredicted = 0;
 
@@ -671,7 +672,11 @@ CAMLnoinline static intnat do_some_marking(intnat work)
       static unsigned int history = 0;
       int *prediction = &predictions[history];
       count++;
-      if (b) count_immediates++;
+      if (!b) {
+        count_immediates++;
+      } else if (Is_young(v)) {
+        count_young++;
+      }
       if (b != (*prediction >= 0)) mispredicted++;
       if (0) {
         // hysteresis
@@ -680,7 +685,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
         if (!b && (*prediction == 1)) *prediction = 0;
       } else {
         // saturating
-        *prediction += 2*b-1;
+        *prediction += b ? 1 : -1;
         if (*prediction < -2) *prediction = -2;
         if (*prediction > 1) *prediction = 1;
       }
@@ -812,10 +817,12 @@ static void mark_slice (intnat work)
     while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
            && errno == EINTR) {}
     if (err == -1) goto out;
+    if (count == 0) count++;
     fprintf(out_immediates_stats,
-            "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%)\n",
-            count, count_immediates, (count_immediates * 100) / (count + 1),
-            mispredicted, (mispredicted * 100) / (count + 1));
+            "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%), young=%ld (%ld%%)\n",
+            count, count_immediates, (count_immediates * 100) / count,
+            mispredicted, (mispredicted * 100) / count,
+            count_young, (count_young * 100) / (count - count_immediates));
     fflush(out_immediates_stats);
     flock(fileno(out_immediates_stats), LOCK_UN);
 
@@ -823,6 +830,7 @@ static void mark_slice (intnat work)
     /* reset stats */
     count_immediates = 0;
     count = 0;
+    count_young = 0;
     mispredicted = 0;
   }
 #endif
