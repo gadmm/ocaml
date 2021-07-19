@@ -159,21 +159,22 @@ int caml_page_table_add(int kind, void * start, void * end)
     if (!atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
                                                  kind, memory_order_acq_rel,
                                                  memory_order_acquire))
-      // It is a programming error to:
+      // It is currently a programming error to:
       // - Let foreign pointers be seen by the OCaml GC
       // - Release the underlying mapping of these pointers, so that
       //   the same virtual space can later be acquired by the runtime.
       //
-      // However we could be more lenient and just find someplace else
-      // (in situations where the world declares their pages of
-      // interest to OCaml in advance, they can free the mapping and
-      // we know to avoid this range). This just needs a third error
-      // value and to adjust the callers.
+      // However we could relax these conditions for libraries that
+      // are ready to declare their pages in advance, in that case
+      // they can free their mapping and we just find someplace else.
+      // To implement this we just need a third error value and adjust
+      // the callers.
       //
-      // This is to ensure that the heap table is monotonic. This is
-      // not a safety measure (there is no guarantee that the GC has
-      // the time to see all the naked pointers before OCaml acquires
-      // the mapping).
+      // This ensures that the heap table is monotonic. This does not
+      // ensure safety (there is no guarantee that the GC has the time
+      // to see all the naked pointers before OCaml acquires the
+      // mapping, except in situations where the outside world
+      // declared their pages of interest in advances).
       if (e != kind) ret = -1;
   }
   return ret;
@@ -280,8 +281,8 @@ void caml_mem_decommit_os(char * block, asize_t size)
 /* Reserving, committing, decommitting. Platform-independent. */
 
 
-/* Heuristic to round up to the nearest small page or huge page,
-   depending on what is best. */
+/* Round up to the nearest small page or huge page, depending on what
+   is best. */
 asize_t caml_round_up_to_huge_page(asize_t size)
 {
   asize_t page_size = caml_use_huge_pages ?
@@ -332,11 +333,10 @@ void caml_mem_decommit(char * block, asize_t size)
 /* A best-fit allocator for reserved virtual address space */
 
 typedef struct {
-  int const page_log;
   /* size of pages managed, typically Huge_page_log or Page_log */
-  struct skiplist free_per_address_sk;
+  int const page_log;
   /* address of each allocated block and its size */
-  struct skiplist free_per_size_sk;
+  struct skiplist free_per_address_sk;
   /* each allocated block ordered per decreasing size.
 
      key: lexicographic ordering by size (decreasing) and address.
@@ -345,6 +345,7 @@ typedef struct {
      |-------------------|------------------------|
         num_max_log bits   small_address_log bits
   */
+  struct skiplist free_per_size_sk;
 } page_allocator;
 
 #define PA_STATIC_INITIALIZER(page_log) \
