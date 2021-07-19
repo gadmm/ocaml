@@ -847,7 +847,7 @@ static void mark_slice (intnat work)
 #else
 #define SUFFIX "-pt.log"
 #endif
-      char * out_file_name = "/tmp/ocaml-stats-mark-prefetching" SUFFIX;
+      char * out_file_name = "/tmp/ocaml-stats-page-table-vas" SUFFIX;
       if (NULL == out_file_name) goto out;
       out_immediates_stats = fopen(out_file_name, "a");
       if (NULL == out_immediates_stats) goto out;
