@@ -58,8 +58,11 @@ uintnat caml_real_page_size = 0;
 #define Pagetable_size (((uintnat)1 << Pagetable_log))
 
 // TODO: better portability of on-demand paging
-#define PAGE_TABLE_ON_DEMAND \
-  (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
+#if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
+#define PAGE_TABLE_ON_DEMAND 1
+#else
+#define PAGE_TABLE_ON_DEMAND 0
+#endif
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
