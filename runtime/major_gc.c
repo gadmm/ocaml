@@ -817,7 +817,7 @@ static void mark_slice (intnat work)
     while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
            && errno == EINTR) {}
     if (err == -1) goto out;
-    if (count == 0) count++;
+    count++;
     fprintf(out_immediates_stats,
             "seen=%ld, immediates=%ld (%ld%%), mispredicted=%ld (%ld%%), young=%ld (%ld%%)\n",
             count, count_immediates, (count_immediates * 100) / count,
