@@ -611,11 +611,6 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
-Caml_inline uintnat rotate1(uintnat x)
-{
-  return (x << ((sizeof x)*8 - 1)) | (x >> 1);
-}
-
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -631,13 +626,12 @@ Caml_noinline static intnat do_some_marking
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
   uintnat young_start = (uintnat)Val_hp(Caml_state->young_start);
-  uintnat half_young_len = ((uintnat)Caml_state->young_end - young_start) >> 1;
-#define Is_block_and_not_young(v) \
-  (((intnat)rotate1((uintnat)v - young_start)) >= (intnat)half_young_len)
+  uintnat young_len = ((uintnat)Caml_state->young_end - young_start);
+#define Is_not_young(v) ((uintnat)v - young_start > young_len)
 #ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
+  #define Is_major_block(v) (Is_block(v) && Is_not_young(v))
 #else
-  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
+  #define Is_major_block(v) (Is_block(v) && Is_in_heap(v))
 #endif
 
   while (1) {
@@ -852,7 +846,7 @@ static void mark_slice (intnat work)
 #define SUFFIX ".log"
 #endif
       char * out_file_name =
-        "/tmp/ocaml-stats-mark-prefetching-412-stats" SUFFIX;
+        "/tmp/ocaml-stats-mark-prefetching-412-stats+optim" SUFFIX;
       if (NULL == out_file_name) goto out;
       out_immediates_stats = fopen(out_file_name, "a");
       if (NULL == out_immediates_stats) goto out;
