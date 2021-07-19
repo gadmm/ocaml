@@ -585,7 +585,6 @@ static void mark_ephe_aux (struct mark_stack *stk, intnat *work,
 #define Pb_min 64
 #define Pb_mask (Pb_size - 1)
 
-#ifdef NO_NAKED_POINTERS
 Caml_inline void prefetch_block(value v)
 {
   /* Prefetch a block so that scanning it later avoids cache misses.
@@ -609,6 +608,7 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
+#ifdef NO_NAKED_POINTERS
 Caml_inline uintnat rotate1(uintnat x)
 {
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
