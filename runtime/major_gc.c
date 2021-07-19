@@ -598,8 +598,14 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   asm("NOPL (%rax)");
   asm("NOPL (%rax)");
 #else
-  // align for clang
    asm("NOP");
+#endif
+#else // not __clang__
+   //align for gcc JCC + -march=skylake
+#ifdef NO_NAKED_POINTERS
+  asm(".nops 4");
+#else
+//  asm(".nops 2");
 #endif
 #endif // __clang__
 */
@@ -663,20 +669,20 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 
     scan_end = obj_end;
     work -= obj_end - scan;
-    if (UNLIKELY(work < 0)) {
+    if (work < 0) {
       scan_end += work;
     }
 
     {
 #ifndef NO_NAKED_POINTERS
-      atomic_char *heap_table = caml_heap_table;
+//      atomic_char *heap_table = caml_heap_table;
 #endif
     for (; scan < scan_end; scan++) {
       value v = *scan;
 #ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
 #else
-      if (Is_block(v) && caml_likely_is_in_heap(heap_table,v)) {
+      if (Is_block(v) && caml_likely_is_in_heap(caml_heap_table,v)) {
 #endif
         if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */
