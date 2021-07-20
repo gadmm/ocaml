@@ -35,6 +35,7 @@
 #include "caml/roots.h"
 #include "caml/skiplist.h"
 #include "caml/signals.h"
+#include "caml/sys.h"
 #include "caml/weak.h"
 #include "caml/memprof.h"
 #include "caml/eventlog.h"
@@ -741,6 +742,7 @@ Caml_noinline static intnat do_some_marking
 }
 
 static FILE * out_immediates_stats = NULL;
+static char * exe_name = NULL;
 
 Caml_inline int64_t time_counter(void)
 {
@@ -852,12 +854,14 @@ static void mark_slice (intnat work)
       out_immediates_stats = fopen(out_file_name, "a");
       if (NULL == out_immediates_stats) goto out;
     }
+    if (exe_name == NULL)
+      exe_name = caml_exe_name ? caml_stat_strdup_of_os(caml_exe_name) : "";
     while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
            && errno == EINTR) {}
     if (err == -1) goto out;
     fprintf(out_immediates_stats,
-            "work_done=%ld, duration(ns)=%lld\n",
-            work_done, (long long)duration);
+            "work_done=%ld, duration(ns)=%lld, exe=%s\n",
+            work_done, (long long)duration, exe_name);
     fflush(out_immediates_stats);
     flock(fileno(out_immediates_stats), LOCK_UN);
 
