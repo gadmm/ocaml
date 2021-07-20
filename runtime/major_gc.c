@@ -576,9 +576,9 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   struct mark_stack stk = *Caml_state->mark_stack;
 
 #ifdef NO_NAKED_POINTERS
-      uintnat young_start = (uintnat)(Caml_state->young_alloc_start + 1);
+      uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
       uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
-#define Is_not_young(v) (((uintnat)v - young_start) > young_len)
+#define Is_not_young(v) (((uintnat)v - young_start) >= young_len)
 /*
 #ifdef __clang__
   // alignment impact (clang -mbranches-within-32B-boundaries)
