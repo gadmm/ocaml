@@ -610,6 +610,10 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
+#if defined(ARCH_SIXTYFOUR) && !defined(NO_NAKED_POINTERS)
+#define PREFETCH_PAGE_TABLE
+#endif
+
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -625,12 +629,7 @@ Caml_noinline static intnat do_some_marking
   struct mark_stack stk = *Caml_state->mark_stack;
   uintnat young_start = (uintnat)Val_hp(Caml_state->young_start);
   uintnat young_len = ((uintnat)Caml_state->young_end - young_start);
-#define Is_not_young(v) ((uintnat)v - young_start > young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) (Is_block(v) && Is_not_young(v))
-#else
-  #define Is_major_block(v) (Is_block(v) && Is_in_heap(v))
-#endif
+#define Is_not_young(v) ((uintnat)v - young_start >= young_len)
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -647,7 +646,11 @@ Caml_noinline static intnat do_some_marking
     if (pb_enqueued > pb_dequeued + min_pb) {
       /* Dequeue from prefetch buffer */
       value block = pb[(pb_dequeued++) & Pb_mask];
-      header_t hd = Hd_val(block);
+      header_t hd;
+#ifdef PREFETCH_PAGE_TABLE
+      if (!Is_in_heap(block)) continue;
+#endif
+      hd = Hd_val(block);
 
       if (Tag_hd(hd) == Infix_tag) {
         block -= Infix_offset_val(block);
@@ -695,11 +698,18 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
-      if (Is_major_block(v)) {
+#if defined(PREFETCH_PAGE_TABLE) || defined(NO_NAKED_POINTERS)
+      if (Is_block(v) && Is_not_young(v)) {
+#else
+      if (Is_block(v) && Is_in_heap(v)) {
+#endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
         }
+#ifdef PREFETCH_PAGE_TABLE
+        caml_page_table_prefetch((void *)v);
+#endif
         prefetch_block(v);
         pb[(pb_enqueued++) & Pb_mask] = v;
       }
@@ -834,11 +844,11 @@ static void mark_slice (intnat work)
     int err = 0;
     if (NULL == out_immediates_stats) {
 #ifdef NO_NAKED_POINTERS
-#define SUFFIX "-nnp.log"
+#define SUFFIX "-is_not_young-nnp.log"
 #else
-#define SUFFIX "-pt.log"
+#define SUFFIX "-page-table-prefetch-simple-pt.log"
 #endif
-      char * out_file_name = "/tmp/ocaml-stats-is_not_young" SUFFIX;
+      char * out_file_name = "/tmp/ocaml-stats" SUFFIX;
       if (NULL == out_file_name) goto out;
       out_immediates_stats = fopen(out_file_name, "a");
       if (NULL == out_immediates_stats) goto out;

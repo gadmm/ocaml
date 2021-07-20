@@ -51,55 +51,20 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
 
-#define Page(p) ((uintnat) (p) >> Page_log)
-#define Page_mask ((~(uintnat)0) << Page_log)
-
 #ifdef ARCH_SIXTYFOUR
 
-/* 64-bit implementation:
-   The page table is represented sparsely as a hash table
-   with linear probing */
+struct page_table caml_page_table;
 
-struct page_table {
-  mlsize_t size;                /* size == 1 << (wordsize - shift) */
-  int shift;
-  mlsize_t mask;                /* mask == size - 1 */
-  mlsize_t occupancy;
-  uintnat * entries;            /* [size]  */
-};
-
-static struct page_table caml_page_table;
-
-/* Page table entries are the logical 'or' of
-   - the key: address of a page (low Page_log bits = 0)
-   - the data: a 8-bit integer */
-
-#define Page_entry_matches(entry,addr) \
-  ((((entry) ^ (addr)) & Page_mask) == 0)
-
-/* Multiplicative Fibonacci hashing
-   (Knuth, TAOCP vol 3, section 6.4, page 518).
-   HASH_FACTOR is (sqrt(5) - 1) / 2 * 2^wordsize. */
-#ifdef ARCH_SIXTYFOUR
-#define HASH_FACTOR 11400714819323198486UL
-#else
-#define HASH_FACTOR 2654435769UL
-#endif
-#define Hash(v) (((v) * HASH_FACTOR) >> caml_page_table.shift)
-
-int caml_page_table_lookup(void * addr)
+uintnat caml_page_table_proceed(void *addr, uintnat *i)
 {
-  uintnat h, e;
-
-  h = Hash(Page(addr));
-  /* The first hit is almost always successful, so optimize for this case */
-  e = caml_page_table.entries[h];
-  if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
+  uintnat e = *i;
+  uintnat *end = caml_page_table.entries + caml_page_table.size;
   while(1) {
     if (e == 0) return 0;
-    h = (h + 1) & caml_page_table.mask;
-    e = caml_page_table.entries[h];
-    if (Page_entry_matches(e, (uintnat)addr)) return e & 0xFF;
+    i++;
+    if (i == end) i = caml_page_table.entries;
+    e = *i;
+    if (Page_entry_matches(e, (uintnat)addr)) return e;
   }
 }
 
@@ -149,7 +114,7 @@ static int caml_page_table_resize(void)
   for (i = 0; i < old.size; i++) {
     uintnat e = old.entries[i];
     if (e == 0) continue;
-    h = Hash(Page(e));
+    h = Caml_Hash(Page(e));
     while (caml_page_table.entries[h] != 0)
       h = (h + 1) & caml_page_table.mask;
     caml_page_table.entries[h] = e;
@@ -169,7 +134,7 @@ static int caml_page_table_modify(uintnat page, int toclear, int toset)
   if (caml_page_table.occupancy * 2 >= caml_page_table.size) {
     if (caml_page_table_resize() != 0) return -1;
   }
-  h = Hash(Page(page));
+  h = Caml_Hash(Page(page));
   while (1) {
     if (caml_page_table.entries[h] == 0) {
       caml_page_table.entries[h] = page | toset;
