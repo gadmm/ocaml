@@ -662,7 +662,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
     for (; scan < scan_end; scan++) {
       value v = *scan;
 #ifndef NO_NAKED_POINTER
-#define H 12
+#define H 14
       int b = Is_block(v);
       // 1 : strongly taken
       // 0 : weakly taken

@@ -3,5 +3,6 @@ This is a branch of OCaml 4.12.0 that:
   Dolan)
 - Records statistic about immediates during marking: for each mark
   slice, the number of words seen, the number of immediates seen, and
-  the number immediates that were mispredicted using a 2-bit counter.
-  These statistics are appended to the file `/tmp/ocamlimmediates.log`.
+  the number branches over [Is_block] that were mispredicted using
+  2-bit counters over a 14-bit history. These statistics are appended
+  to the file `/tmp/ocamlimmediates.log`.
