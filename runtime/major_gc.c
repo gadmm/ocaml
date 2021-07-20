@@ -15,8 +15,11 @@
 
 #define CAML_INTERNALS
 
+#include <sys/file.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <unistd.h>
 
 #include "caml/compact.h"
 #include "caml/custom.h"
@@ -32,9 +35,16 @@
 #include "caml/roots.h"
 #include "caml/skiplist.h"
 #include "caml/signals.h"
+#include "caml/sys.h"
 #include "caml/weak.h"
 #include "caml/memprof.h"
 #include "caml/eventlog.h"
+
+#if defined(_POSIX_TIMERS) && defined(_POSIX_MONOTONIC_CLOCK)
+#define POSIX_CLOCK
+#include <time.h>
+#include <stdint.h>
+#endif
 
 #ifdef _MSC_VER
 Caml_inline double fmin(double a, double b) {
@@ -555,8 +565,24 @@ static void mark_ephe_aux (struct mark_stack *stk, intnat *work,
   }
 }
 
+static FILE * out_immediates_stats = NULL;
+static char * exe_name = NULL;
+
+Caml_inline int64_t time_counter(void)
+{
+#if defined(POSIX_CLOCK)
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (int64_t)t.tv_sec * (int64_t)1000000000 + (int64_t)t.tv_nsec;
+#else
+  return 0;
+#endif
+}
+
 static void mark_slice (intnat work)
 {
+  int64_t duration = 0;
+  intnat work_done = 0;
   mark_entry me = {0, 0};
   mlsize_t me_end = 0;
 #ifdef CAML_INSTR
@@ -593,6 +619,8 @@ static void mark_slice (intnat work)
     }
 
     if( can_mark ) {
+      int64_t time_start = time_counter();
+      intnat work_start = work;
       CAMLassert(Is_block(me.block) &&
                  Is_black_val (me.block) &&
                  Tag_val(me.block) < No_scan_tag);
@@ -609,6 +637,8 @@ static void mark_slice (intnat work)
       if( me.offset == me_end ) {
         work--; /* Include header word */
       }
+      duration += time_counter() - time_start;
+      work_done += work_start - work;
     } else if( redarken_first_chunk != NULL ) {
       /* There are chunks that need to be redarkened because we
          overflowed our mark stack */
@@ -666,6 +696,38 @@ static void mark_slice (intnat work)
   }
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_FIELDS, slice_fields);
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_POINTERS, slice_pointers);
+
+  {
+    int err = 0;
+    if (NULL == out_immediates_stats) {
+#ifdef NO_NAKED_POINTERS
+#define SUFFIX "-nnp.log"
+#else
+#define SUFFIX "-pt.log"
+#endif
+      char * out_file_name = "/tmp/ocaml-stats-412-fixed" SUFFIX;
+      if (NULL == out_file_name) goto out;
+      out_immediates_stats = fopen(out_file_name, "a");
+      if (NULL == out_immediates_stats) goto out;
+    }
+    if (exe_name == NULL)
+      exe_name = caml_exe_name ? caml_stat_strdup_of_os(caml_exe_name) : "";
+    while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
+           && errno == EINTR) {}
+    if (err == -1) goto out;
+    fprintf(out_immediates_stats,
+            "work_done=%ld, duration(ns)=%lld, exe=%s\n",
+            work_done, (long long)duration, exe_name);
+    fflush(out_immediates_stats);
+    flock(fileno(out_immediates_stats), LOCK_UN);
+
+  out:
+    /* reset stats */
+/*    count_immediates = 0;
+    count = 0;
+    count_young = 0;
+    mispredicted = 0;*/{}
+  }
 }
 
 /* Clean ephemerons */
