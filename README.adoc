@@ -1,5 +1,8 @@
 This is a branch of OCaml 4.12.0 that:
 - Uses prefetching during marking and sweeping (courtesy of Stephen
   Dolan)
+- Has small optimisations to prefetching during marking (very small in
+  nnp, very impactful in pt)
 - Records statistic about durations of mark slices. These statistics
-  are appended to the file `/tmp/ocaml-stats-mark-prefetching.log`.
+  are appended to the files `/tmp/ocaml-stats-is_not_young-nnp.log`
+  and `/tmp/ocaml-stats-page-table-prefetch-simple-pt.log`.
