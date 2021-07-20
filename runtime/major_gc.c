@@ -583,11 +583,11 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   struct mark_stack stk = *Caml_state->mark_stack;
 
 #ifdef NO_NAKED_POINTERS
-  uintnat young_start = (uintnat)Caml_state->young_alloc_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
-                            - (uintnat)Caml_state->young_alloc_start) >> 1;
+  uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
+  uintnat half_young_len =
+    ((uintnat)Caml_state->young_alloc_end - young_start) >> 1;
 #define Is_block_and_not_young(v) \
-  (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
+  (((intnat)rotate1((uintnat)v - young_start)) >= (intnat)half_young_len)
 #endif
 
   while (1) {
