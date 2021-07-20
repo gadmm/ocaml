@@ -15,6 +15,8 @@
 
 #define CAML_INTERNALS
 
+#include <sys/file.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
 
@@ -606,6 +608,11 @@ Caml_inline uintnat rotate1(uintnat x)
   return (x << ((sizeof x)*8 - 1)) | (x >> 1);
 }
 
+static uintnat count = 0;
+static uintnat count_young = 0;
+static uintnat count_immediates = 0;
+static uintnat mispredicted = 0;
+
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -624,11 +631,6 @@ Caml_noinline static intnat do_some_marking
     ((uintnat)Caml_state->young_end - (uintnat)Caml_state->young_start) >> 1;
 #define Is_block_and_not_young(v) \
   (((intnat)rotate1((uintnat)v - young_start)) > (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
-#else
-  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
-#endif
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -693,7 +695,40 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
-      if (Is_major_block(v)) {
+#ifndef NO_NAKED_POINTER
+#define H 14
+      int b = Is_block(v);
+      // 1 : strongly taken
+      // 0 : weakly taken
+      // -1 : weakly not taken
+      // -2 : strongly not taken
+      static int predictions[1 << H] = { -1 };
+      static unsigned int history = 0;
+      int *prediction = &predictions[history];
+      count++;
+      if (!b) {
+        count_immediates++;
+      } else if (Is_young(v)) {
+        count_young++;
+      }
+      if (b != (*prediction >= 0)) mispredicted++;
+      if (0) {
+        // hysteresis
+        if (*prediction == 0 || *prediction == -1) *prediction = 3*b-2;
+        if (b && (*prediction == -2)) *prediction = -1;
+        if (!b && (*prediction == 1)) *prediction = 0;
+      } else {
+        // saturating
+        *prediction += b ? 1 : -1;
+        if (*prediction < -2) *prediction = -2;
+        if (*prediction > 1) *prediction = 1;
+      }
+      history = ((history << 1) + b) & ((1 << H) - 1);
+#endif
+      if (Is_block_and_not_young(v)) {
+#ifndef NO_NAKED_POINTERS
+        if (!Is_in_heap(v)) continue;
+#endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */
@@ -728,6 +763,8 @@ Caml_noinline static intnat do_some_marking
     ephe_list_pure = 0;
   return work;
 }
+
+static FILE * out_immediates_stats = NULL;
 
 static void mark_slice (intnat work)
 {
@@ -809,6 +846,37 @@ static void mark_slice (intnat work)
   }
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_FIELDS, slice_fields);
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_POINTERS, slice_pointers);
+
+#ifndef NO_NAKED_POINTERS
+  {
+    int err = 0;
+    if (NULL == out_immediates_stats) {
+      char * out_file_name = "/tmp/ocamlimmediates.log";
+      if (NULL == out_file_name) goto out;
+      out_immediates_stats = fopen(out_file_name, "a");
+      if (NULL == out_immediates_stats) goto out;
+    }
+    while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
+           && errno == EINTR) {}
+    if (err == -1) goto out;
+    count++;
+    fprintf(out_immediates_stats,
+            "seen=%ld, immediates=%ld (%ld%%), "
+            "mispredicted=%ld (%ld%%), young=%ld (%ld%%)\n",
+            count, count_immediates, (count_immediates * 100) / count,
+            mispredicted, (mispredicted * 100) / count,
+            count_young, (count_young * 100) / (count - count_immediates));
+    fflush(out_immediates_stats);
+    flock(fileno(out_immediates_stats), LOCK_UN);
+
+  out:
+    /* reset stats */
+    count_immediates = 0;
+    count = 0;
+    count_young = 0;
+    mispredicted = 0;
+  }
+#endif
 }
 
 /* Clean ephemerons */
