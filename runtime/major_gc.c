@@ -15,8 +15,11 @@
 
 #define CAML_INTERNALS
 
+#include <sys/file.h>
+#include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <unistd.h>
 
 #include "caml/compact.h"
 #include "caml/custom.h"
@@ -35,6 +38,12 @@
 #include "caml/weak.h"
 #include "caml/memprof.h"
 #include "caml/eventlog.h"
+
+#if defined(_POSIX_TIMERS) && defined(_POSIX_MONOTONIC_CLOCK)
+#define POSIX_CLOCK
+#include <time.h>
+#include <stdint.h>
+#endif
 
 #ifdef _MSC_VER
 Caml_inline double fmin(double a, double b) {
@@ -731,8 +740,23 @@ Caml_noinline static intnat do_some_marking
   return work;
 }
 
+static FILE * out_immediates_stats = NULL;
+
+Caml_inline int64_t time_counter(void)
+{
+#if defined(POSIX_CLOCK)
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (int64_t)t.tv_sec * (int64_t)1000000000 + (int64_t)t.tv_nsec;
+#else
+  return 0;
+#endif
+}
+
 static void mark_slice (intnat work)
 {
+  int64_t duration = 0;
+  intnat work_done = 0;
 #ifdef CAML_INSTR
   int slice_fields = 0; /** eventlog counters */
 #endif /*CAML_INSTR*/
@@ -743,12 +767,15 @@ static void mark_slice (intnat work)
   caml_gc_message (0x40, "Subphase = %d\n", caml_gc_subphase);
 
   while (1){
+    int64_t time_start = time_counter();
+    intnat work_start = work;
 #ifndef CAML_INSTR
     work = do_some_marking(work);
 #else
     work = do_some_marking(work, &slice_fields, &slice_pointers);
 #endif
-
+    duration += time_counter() - time_start;
+    work_done += work_start - work;
     if (work <= 0)
       break;
 
@@ -811,6 +838,36 @@ static void mark_slice (intnat work)
   }
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_FIELDS, slice_fields);
   CAML_EV_COUNTER(EV_C_MAJOR_MARK_SLICE_POINTERS, slice_pointers);
+
+  {
+    int err = 0;
+    if (NULL == out_immediates_stats) {
+#ifdef NO_NAKED_POINTERS
+#define SUFFIX "-nnp.log"
+#else
+#define SUFFIX "-pt.log"
+#endif
+      char * out_file_name = "/tmp/ocaml-stats-mark-prefetching" SUFFIX;
+      if (NULL == out_file_name) goto out;
+      out_immediates_stats = fopen(out_file_name, "a");
+      if (NULL == out_immediates_stats) goto out;
+    }
+    while (-1 == (err = flock(fileno(out_immediates_stats), LOCK_EX))
+           && errno == EINTR) {}
+    if (err == -1) goto out;
+    fprintf(out_immediates_stats,
+            "work_done=%ld, duration(ns)=%lld\n",
+            work_done, (long long)duration);
+    fflush(out_immediates_stats);
+    flock(fileno(out_immediates_stats), LOCK_UN);
+
+  out:
+    /* reset stats */
+/*    count_immediates = 0;
+    count = 0;
+    count_young = 0;
+    mispredicted = 0;*/{}
+  }
 }
 
 /* Clean ephemerons */
