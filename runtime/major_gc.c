@@ -629,9 +629,6 @@ Caml_noinline static intnat do_some_marking
   /* These global values are cached in locals,
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
-  uintnat young_start = (uintnat)Val_hp(Caml_state->young_start);
-  uintnat young_len = ((uintnat)Caml_state->young_end - young_start);
-#define Is_not_young(v) ((uintnat)v - young_start >= young_len)
 
   while (1) {
     value *scan, *obj_end, *scan_end;
@@ -702,7 +699,7 @@ Caml_noinline static intnat do_some_marking
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
 #if defined(PREFETCH_PAGE_TABLE) || defined(NO_NAKED_POINTERS)
-      if (Is_block(v) && __builtin_expect(Is_not_young(v),1)) {
+      if (Is_block(v) && __builtin_expect(!Is_young(v),1)) {
 #else
       if (Is_block(v) && __builtin_expect(Is_in_heap(v),1)) {
 #endif
@@ -851,7 +848,7 @@ static void mark_slice (intnat work)
     int err = 0;
     if (NULL == out_immediates_stats) {
 #ifdef NO_NAKED_POINTERS
-#define SUFFIX "-is_not_young-nnp.log"
+#define SUFFIX "-not_is_young-nnp.log"
 #else
 #define SUFFIX "-page-table-prefetch-simple-pt.log"
 #endif
