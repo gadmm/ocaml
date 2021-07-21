@@ -700,9 +700,9 @@ Caml_noinline static intnat do_some_marking
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
 #if defined(PREFETCH_PAGE_TABLE) || defined(NO_NAKED_POINTERS)
-      if (Is_block(v) && Is_not_young(v)) {
+      if (Is_block(v) && __builtin_expect(Is_not_young(v),1)) {
 #else
-      if (Is_block(v) && Is_in_heap(v)) {
+      if (Is_block(v) && __builtin_expect(Is_in_heap(v),1)) {
 #endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (pb_enqueued == pb_dequeued + Pb_size) {
