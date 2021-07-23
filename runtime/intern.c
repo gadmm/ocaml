@@ -611,6 +611,9 @@ static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
   }
   wosize = Wosize_whsize(whsize);
   if (wosize > Max_wosize) {
+#ifndef DO_NOT_SIMULATE_412_BEHAVIOUR
+    // nothing to do: already rounded to the page by caml_alloc_to_do
+#endif
     asize_t request = Bsize_wsize(whsize);
     intern_extra_block = caml_alloc_for_heap(request);
     if (intern_extra_block == NULL) {
