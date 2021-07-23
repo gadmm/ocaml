@@ -589,11 +589,24 @@ char *caml_alloc_for_heap (asize_t request)
   // TODO: free on shutdown
   char *mem, *block;
   asize_t reserved, committed;
+#ifdef DO_NOT_SIMULATE_412_BEHAVIOUR
   request += sizeof(heap_chunk_head);
+#else
+  if (caml_alloc_for_heap) {
+    request = caml_round_up_to_huge_page(request + sizeof(heap_chunk_head));
+  } else {
+    request = round_up(request, Page_size);
+    request += sizeof(heap_chunk_head);
+  }
+#endif
   if (-1 == caml_heap_commit(request, &block, &committed, &reserved))
     return NULL;
   mem = block + sizeof(heap_chunk_head);
+#ifdef DO_NOT_SIMULATE_412_BEHAVIOUR
   Chunk_size(mem) = committed - sizeof(heap_chunk_head);
+#else
+  Chunk_size(mem) = request - sizeof(heap_chunk_head);
+#endif
   Chunk_block(mem) = block;
   Chunk_block_size(mem) = reserved;
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
