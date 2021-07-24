@@ -130,11 +130,12 @@ extern struct page_table caml_page_table;
 
 uintnat caml_page_table_proceed(void *addr, uintnat *i);
 
-/* 64 bits: Represent page table as a sparse hash table */
+#ifdef CAML_INTERNALS
 inline void caml_page_table_prefetch(void *addr)
 {
   return caml_prefetch(&caml_page_table.entries[Caml_Hash(Page(addr))]);
 }
+#endif
 
 inline uintnat caml_page_table_lookup(void *addr)
 {
