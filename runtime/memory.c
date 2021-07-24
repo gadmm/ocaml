@@ -592,7 +592,7 @@ char *caml_alloc_for_heap (asize_t request)
 #ifdef DO_NOT_SIMULATE_412_BEHAVIOUR
   request += sizeof(heap_chunk_head);
 #else
-  if (caml_alloc_for_heap) {
+  if (caml_use_huge_pages) {
     request = caml_round_up_to_huge_page(request + sizeof(heap_chunk_head));
   } else {
     request = round_up(request, Page_size);
