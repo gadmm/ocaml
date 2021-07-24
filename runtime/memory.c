@@ -55,10 +55,10 @@ atomic_char *caml_heap_table = NULL;
 uintnat caml_real_page_size = 0;
 
 #define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log) // 20
-#define Pagetable_size (((uintnat)1 << Pagetable_log))
+#define Pagetable_half_size ((intnat)1 << (Pagetable_log - 1))
 
 // TODO: better portability of on-demand paging
-#if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
+#if defined(NATIVE_CODE) && defined(POSIX_SIGNALS)
 #define PAGE_TABLE_ON_DEMAND 1
 #else
 #define PAGE_TABLE_ON_DEMAND 0
@@ -78,10 +78,10 @@ int caml_page_table_initialize(mlsize_t bytesize)
   int prot = PROT_READ | PROT_WRITE;
 #endif
   // TODO: win32
-  void *block = mmap(NULL, Pagetable_size, prot,
+  void *block = mmap(NULL, 2 * Pagetable_half_size, prot,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return -1;
-  caml_heap_table = (atomic_char *)block;
+  caml_heap_table = (atomic_char *)block + Pagetable_half_size;
   caml_real_page_size = sysconf(_SC_PAGESIZE);
   CAMLassert(caml_real_page_size >= Page_size);
   return 0;
@@ -94,9 +94,14 @@ int caml_page_table_initialize(mlsize_t bytesize)
   (CAMLassert_is_power_of_2(m),CAMLassert_aligned_(n,m))
 #define CAMLassert_is_power_of_2(n) CAMLassert_aligned_(n, n)
 
-static uintnat round_up(uintnat n, uintnat mod)
+static intnat round_down(intnat n, intnat mod)
 {
-  return (n + mod - 1) / mod * mod;
+  return mod * (n / mod  - (n < 0 ? 1 : 0));
+}
+
+static intnat round_up(intnat n, intnat mod)
+{
+  return round_down(n + mod - 1, mod);
 }
 
 /* This is called infrequently, and for a small portion of
@@ -104,14 +109,15 @@ static uintnat round_up(uintnat n, uintnat mod)
    [caml_alloc_for_heap] which tends to reserve heap inside
    already-committed pages of caml_heap_table. Must be
    async-signal-safe.*/
-static int page_table_commit(uintnat start, uintnat end)
+static int page_table_commit(intnat start, intnat end)
 {
   int ret = 0;
 #if PAGE_TABLE_ON_DEMAND
-  uintnat page_start = start & Real_page_mask;
-  uintnat page_end = round_up(end, Real_page_size);
+  intnat page_start = round_down(start, Real_page_size);
+  intnat page_end = round_up(end, Real_page_size);
   uintnat size = page_end - page_start;
-  CAMLassert(page_end <= Pagetable_size);
+  CAMLassert(page_start >= -Pagetable_half_size);
+  CAMLassert(page_end <= Pagetable_half_size);
   ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
   CAMLassert(ret != -1 || errno == ENOMEM);
 #endif
@@ -126,10 +132,10 @@ static int page_table_commit(uintnat start, uintnat end)
 */
 int caml_page_table_fault(void *addr)
 {
-  uintnat p = (uintnat)addr;
-  if (p >= (uintnat)caml_heap_table ||
-      p < (uintnat)caml_heap_table + Pagetable_size) {
-    int e = p - (uintnat)caml_heap_table;
+  intnat p = (intnat)addr;
+  if (p >= (intnat)caml_heap_table - Pagetable_half_size ||
+      p < (intnat)caml_heap_table + Pagetable_half_size) {
+    int e = p - (intnat)caml_heap_table;
     // Allocate a page of the heap table.
     if (-1 == page_table_commit(e, e + 1)) {
       // We assume that this call is safe because we cause the fault
@@ -152,7 +158,7 @@ int caml_page_table_fault(void *addr)
 int caml_page_table_add(int kind, void * start, void * end)
 {
   int pstart = Pagetable_entry(start);
-  int pend = Pagetable_entry((uintnat)end - 1) + 1;
+  int pend = Pagetable_entry((intnat)end - 1) + 1;
   int p;
   int ret = 0;
   if (-1 == page_table_commit(pstart, pend)) return -1;

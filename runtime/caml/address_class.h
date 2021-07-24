@@ -123,20 +123,19 @@ CAMLextern uintnat caml_real_page_size;
 #define Pagetable_significant_bits 48
 // TODO: might be better at 1GB (L4 idx + L3 idx)
 #define Pagetable_entry_log 28 // 256MB
-#define Pagetable_entry(p)                                            \
-  (((uintnat)(p) & (((uintnat)1 << Pagetable_significant_bits) - 1))  \
-   >> Pagetable_entry_log)
 
 #else
 
 #define Pagetable_significant_bits 32
 #define Pagetable_entry_log (Page_log + 2) // 16KB
-#define Pagetable_entry(p) ((uintnat)(p) >> Pagetable_entry_log)
 
 #endif /* ARCH_SIXTYFOUR */
 
-#define Pagetable_entry_size ((uintnat)1 << Pagetable_entry_log)
+#define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
+#define Pagetable_entry(p) ((intnat)(p) >> Pagetable_entry_log)
 
+static_assert((intnat)(-1) >> 1 == (intnat)(-1),
+              "signed shift is not an arithmetic shift");
 static_assert(Huge_page_log < Pagetable_entry_log, "invalid page sizes");
 static_assert(Page_log < Huge_page_log, "invalid page sizes");
 
@@ -144,9 +143,10 @@ CAMLextern atomic_char *caml_heap_table;
 
 int caml_is_in_static_data(void *a);
 
+// TODO: This should not always mutate the heap table (only during marking?)
 inline int caml_classify_address(void *a, int kind)
 {
-  uintnat p = Pagetable_entry(a);
+  intnat p = Pagetable_entry(a);
   char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
   CAMLassert(kind != 0);
   if (e & kind) {
