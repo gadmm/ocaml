@@ -145,18 +145,13 @@ CAMLextern atomic_char *caml_heap_table;
 
 int caml_is_in_static_data(void *a);
 
-inline int caml_classify_address(void *a, int kind)
+inline int caml_classify_entry(int p, int kind, atomic_char *heap_table)
 {
-  intnat p = Pagetable_entry(a);
-  char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
+  char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
   CAMLassert(kind != 0);
-  if (e & kind) {
-    /* no synchronisation required */
-    return 1;
-  }
   if (LIKELY(e != 0)) {
     /* no synchronisation required */
-    return 0;
+    return e & kind;
   }
   // e == 0
   /* This measures the cost of synchronisation in multicore: the
@@ -175,6 +170,25 @@ inline int caml_classify_address(void *a, int kind)
     // e != 0
     return e & kind;
   }
+}
+
+inline int caml_classify_address(void *a, int kind)
+{
+  return caml_classify_entry(Pagetable_entry(a), kind, caml_heap_table);
+}
+
+inline int caml_classify_in_heap_cached(value v, int *cached_p,
+                                        atomic_char *heap_table)
+{
+  int p = Pagetable_entry(v);
+  if (*cached_p != p) {
+    if (caml_classify_entry(p, In_heap, heap_table)) {
+      *cached_p = p;
+      return 1;
+    }
+    return 0;
+  }
+  return 1;
 }
 
 inline int caml_is_in_value_area(void *a)
