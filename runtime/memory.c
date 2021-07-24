@@ -55,7 +55,9 @@ atomic_char *caml_heap_table = NULL;
 uintnat caml_real_page_size = 0;
 
 #define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log) // 20
-#define Pagetable_size (((intnat)1 << Pagetable_log))
+#define Pagetable_size (((int)1 << Pagetable_log))
+
+static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 
 // TODO: better portability of on-demand paging
 #if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
