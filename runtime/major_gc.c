@@ -581,6 +581,9 @@ CAMLnoinline static intnat do_some_marking(intnat work)
   value pb[Pb_size];
   uintnat min_pb = Pb_min;
   struct mark_stack stk = *Caml_state->mark_stack;
+#ifndef NO_NAKED_POINTERS
+  atomic_char *heap_table = caml_heap_table;
+#endif
 
 #ifdef NO_NAKED_POINTERS
   uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
@@ -659,7 +662,7 @@ CAMLnoinline static intnat do_some_marking(intnat work)
 #ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
 #else
-      if (Is_block(v) && Is_in_heap(v)) {
+      if (Is_block(v) && caml_in_heap_cached(v, heap_table)) {
 #endif
         if (pb_enqueued == pb_dequeued + Pb_size) {
           break; /* Prefetch buffer is full */

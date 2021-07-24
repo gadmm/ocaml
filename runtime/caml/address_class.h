@@ -73,7 +73,7 @@
    (char *)(val) < (char *)Caml_state_field(young_alloc_end) && \
    (char *)(val) > (char *)Caml_state_field(young_alloc_start))
 
-#define Is_in_heap(a) (caml_classify_address((void*)a, In_heap))
+#define Is_in_heap(a) (caml_classify_address((void*)a) & In_heap)
 
 #ifdef NO_NAKED_POINTERS
 
@@ -82,10 +82,11 @@
 
 #else
 
-#define Is_in_heap_or_young(a) \
-  (caml_classify_address((void*)a, In_heap | In_young))
+#define Is_in_heap_or_young(a)                              \
+  (caml_classify_address((void*)a) & (In_heap | In_young))
 
-#define Is_in_value_area(a) (caml_is_in_value_area((void *)a))
+#define Is_in_value_area(a) \
+  (Is_in_heap_or_young(a) || caml_is_in_static_data((void *)(a)))
 
 #endif /* NO_NAKED_POINTERS */
 
@@ -102,7 +103,7 @@
 // Real page size can be greater. (slower)
 CAMLextern uintnat caml_real_page_size;
 #define Real_page_size \
-  (CAMLassert(caml_real_page_size !=0), caml_real_page_size)
+  (CAMLassert(caml_real_page_size != 0), caml_real_page_size)
 #define Real_page_mask (~(Real_page_size - 1))
 
 /* There does not seem to be a way to ask the OS for the size of a
@@ -144,20 +145,9 @@ CAMLextern atomic_char *caml_heap_table;
 int caml_is_in_static_data(void *a);
 
 // TODO: This should not always mutate the heap table (only during marking?)
-inline int caml_classify_address(void *a, int kind)
+inline int caml_heap_table_get_sync(intnat p)
 {
-  intnat p = Pagetable_entry(a);
-  char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
-  CAMLassert(kind != 0);
-  if (e & kind) {
-    /* no synchronisation required */
-    return 1;
-  }
-  if (LIKELY(e != 0)) {
-    /* no synchronisation required */
-    return 0;
-  }
-  // e == 0
+  char e = 0;
   /* This measures the cost of synchronisation in multicore: the
      current branch occurs infrequently-enough (at most once per
      visited heap table entry per domain, by monotonicity of the page
@@ -169,17 +159,28 @@ inline int caml_classify_address(void *a, int kind)
   if (atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
                                               Unmanaged, memory_order_acq_rel,
                                               memory_order_acquire)) {
-    return Unmanaged & kind;
+    return Unmanaged;
   } else {
     // e != 0
-    return e & kind;
+    return e;
   }
 }
 
-inline int caml_is_in_value_area(void *a)
+inline int caml_classify_address(void *a)
 {
-  if (Is_in_heap_or_young(a)) return 1;
-  return caml_is_in_static_data(a);
+  intnat p = Pagetable_entry(a);
+  char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
+  if (LIKELY(e != 0)) return e;
+  return caml_heap_table_get_sync(p);
+}
+
+inline int caml_in_heap_cached(value v, atomic_char *heap_table)
+{
+  intnat p = Pagetable_entry(v);
+  char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
+  if (LIKELY(e & In_heap)) return 1;
+  if (LIKELY(e != 0)) return 0;
+  return caml_heap_table_get_sync(p) & In_heap;
 }
 
 int caml_page_table_fault(void *addr);
