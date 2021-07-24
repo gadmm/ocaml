@@ -630,6 +630,9 @@ Caml_noinline static intnat do_some_marking
   /* These global values are cached in locals,
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
+#ifndef NO_NAKED_POINTERS
+  atomic_char *heap_table = caml_heap_table;
+#endif
 
 #ifdef NO_NAKED_POINTERS
   uintnat young_start = (uintnat)Caml_state->young_alloc_start;
@@ -715,12 +718,12 @@ Caml_noinline static intnat do_some_marking
 #ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
 #else
-      if (Is_block(v) && Is_in_heap(v)) {
+      if (Is_block(v) && caml_in_heap_cached(v, heap_table)) {
 #endif
 #ifdef CAML_INSTR
         slice_pointers ++;
 #endif
-        if (pb_enqueued == pb_dequeued + Pb_size) {
+        if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           /* Prefetch buffer is full */
           work += scan_end - scan; /* scanning work not done */
           break;
