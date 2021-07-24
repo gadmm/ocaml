@@ -127,20 +127,22 @@ static int page_table_commit(uintnat start, uintnat end)
 int caml_page_table_fault(void *addr)
 {
   uintnat p = (uintnat)addr;
-  // If outside of the page table, it is not ours
-  if (p < (uintnat)caml_heap_table ||
-      p >= (uintnat)caml_heap_table + Pagetable_size)
-    return 0;
-  // Allocate a page of the heap table.
-  if (-1 == page_table_commit(p, p + 1)) {
-    // We assume that this call is safe because we cause the fault in
-    // places in the runtime that are safe for functions like malloc,
-    // printf... and the program execution will end immediately
-    // afterwards. We make the same assumption for the asserts inside
-    // page_table_commit.
-    caml_fatal_error("out of memory");
+  if (p >= (uintnat)caml_heap_table ||
+      p < (uintnat)caml_heap_table + Pagetable_size) {
+    int e = p - (uintnat)caml_heap_table;
+    // Allocate a page of the heap table.
+    if (-1 == page_table_commit(e, e + 1)) {
+      // We assume that this call is safe because we cause the fault
+      // in places in the runtime that are safe for functions like
+      // malloc, printf... and the program execution will end
+      // immediately afterwards. We make the same assumption for the
+      // asserts inside page_table_commit.
+      caml_fatal_error("out of memory");
+    }
+    return 1;
   }
-  return 1;
+  // If outside of the page table, it is not ours
+  return 0;
 }
 
 // Assumes that the caller owns the mapping from start to end, to
@@ -149,9 +151,9 @@ int caml_page_table_fault(void *addr)
 // set to [kind]).
 int caml_page_table_add(int kind, void * start, void * end)
 {
-  uintnat pstart = Pagetable_entry(start);
-  uintnat pend = Pagetable_entry((uintnat)end - 1) + 1;
-  uintnat p;
+  int pstart = Pagetable_entry(start);
+  int pend = Pagetable_entry((uintnat)end - 1) + 1;
+  int p;
   int ret = 0;
   if (-1 == page_table_commit(pstart, pend)) return -1;
   for (p = pstart; p < pend; p++) {
