@@ -630,7 +630,6 @@ Caml_noinline static intnat do_some_marking
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
 #ifndef NO_NAKED_POINTERS
-  int last_heap_pt_entry = INT_MAX;
   atomic_char *heap_table = caml_heap_table;
 #endif
 
@@ -708,10 +707,10 @@ Caml_noinline static intnat do_some_marking
 #ifdef NO_NAKED_POINTERS
       if (Is_block_and_not_young(v)) {
 #else
-      if (Is_block(v) && caml_classify_in_heap_cached(v, &last_heap_pt_entry, heap_table)) {
+      if (Is_block(v) && caml_in_heap_cached(v, heap_table)) {
 #endif
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
-        if (pb_enqueued == pb_dequeued + Pb_size) {
+        if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */
         }
         prefetch_block(v);
