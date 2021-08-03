@@ -42,9 +42,10 @@ asize_t caml_code_size;
 
 void caml_init_code_fragments(void) {
   /* Register the main bytecode block in the table of code fragments */
-  caml_register_code_fragment((char *) caml_start_code,
-                              (char *) caml_start_code + caml_code_size,
-                              DIGEST_NOW, NULL);
+  char *start = (char *)caml_start_code;
+  char *end = (char *)caml_start_code + caml_code_size;
+  caml_register_code_fragment(start, end, DIGEST_NOW, NULL);
+  if (-1 == caml_page_table_add(Unmanaged, start, end)) CAMLassert(0);
 }
 
 void caml_load_code(int fd, asize_t len)

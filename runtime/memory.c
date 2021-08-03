@@ -639,10 +639,6 @@ int caml_add_to_heap (char *m)
                    ARCH_INTNAT_PRINTF_FORMAT "uk bytes\n",
      (Bsize_wsize (Caml_state->stat_heap_wsz) + Chunk_size (m)) / 1024);
 
-  /* Register block in page table */
-  if (caml_page_table_add(In_heap, m, m + Chunk_size(m)) != 0)
-    return -1;
-
   /* Chain this heap chunk. */
   {
     char **last = &caml_heap_start;
