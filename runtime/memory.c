@@ -111,17 +111,32 @@ static intnat round_up(intnat n, intnat mod)
    async-signal-safe.*/
 static int page_table_commit(intnat start, intnat end)
 {
-  int ret = 0;
 #if PAGE_TABLE_ON_DEMAND
+  int ret;
+  // TODO: thread-safe (or remove optim)
+  static char committed[2 * Pagetable_half_size / Page_size] = { 0 };
   intnat page_start = round_down(start, Real_page_size);
   intnat page_end = round_up(end, Real_page_size);
   uintnat size = page_end - page_start;
+  int done = 1;
+  intnat p;
   CAMLassert(page_start >= -Pagetable_half_size);
   CAMLassert(page_end <= Pagetable_half_size);
+  for (p = page_start; p < page_end; p += Page_size) {
+    if (!committed[Pagetable_half_size / Page_size + (p >> Page_log)]) {
+      done = 0;
+      break;
+    }
+  }
+  if (done) return 0;
   ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
   CAMLassert(ret != -1 || errno == ENOMEM);
+  if (ret == -1) return -1;
+  for (p = page_start; p < page_end; p += Page_size) {
+    committed[Pagetable_half_size / Page_size + (p >> Page_log)] = 1;
+  }
 #endif
-  return ret;
+  return 0;
 }
 
 /* Function called from a signal handler. It must be
