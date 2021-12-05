@@ -640,6 +640,7 @@ Caml_noinline static intnat do_some_marking
 #else
   #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
 #endif
+  value * pb_orig[Pb_size];
 
 #ifdef CAML_INSTR
   int slice_fields = 0, slice_pointers = 0;
@@ -651,13 +652,29 @@ Caml_noinline static intnat do_some_marking
 
     if (pb_enqueued > pb_dequeued + min_pb) {
       /* Dequeue from prefetch buffer */
-      value block = pb[(pb_dequeued++) & Pb_mask];
+      value block = pb[pb_dequeued & Pb_mask];
       header_t hd = Hd_val(block);
 
-      if (Tag_hd(hd) == Infix_tag) {
-        block -= Infix_offset_val(block);
-        hd = Hd_val(block);
+      if (Tag_hd(hd) >= Infix_tag) {
+        if (Tag_hd(hd) == Infix_tag) {
+          block -= Infix_offset_val(block);
+          hd = Hd_val(block);
+        } else if (Tag_hd(hd) == Forward_tag) {
+          value f = Forward_val(block);
+          if (!Is_block(f) || (Is_in_value_area(f)
+                               && Tag_val (f) != Forward_tag
+                               && Tag_val (f) != Lazy_tag
+                               && Tag_val (f) != Double_tag)) {
+            /* Short-circuit the pointer */
+            value *orig = pb_orig[pb_dequeued & Pb_mask];
+            *orig = f;
+            if (Is_block (f) && Is_young (f) && !Is_young (block))
+              add_to_ref_table (Caml_state->ref_table, orig);
+          }
+        }
       }
+
+      pb_dequeued++;
 
 #ifdef NO_NAKED_POINTERS
       /* See [caml_darken] for a description of this assertion. */
@@ -724,7 +741,9 @@ Caml_noinline static intnat do_some_marking
           break;
         }
         prefetch_block(v);
-        pb[(pb_enqueued++) & Pb_mask] = v;
+        pb[pb_enqueued & Pb_mask] = v;
+        pb_orig[pb_enqueued & Pb_mask] = scan;
+        pb_enqueued++;
       }
 #if defined(NAKED_POINTERS_CHECKER) && defined(NATIVE_CODE)
       else if (Is_block_and_not_young (v) && !Is_in_heap (v)){
