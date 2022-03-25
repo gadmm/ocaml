@@ -80,6 +80,13 @@ void caml_free_signal_stack(void);
 /* These hooks are not modified after other threads are spawned. */
 CAMLextern void (*caml_enter_blocking_section_hook)(void);
 CAMLextern void (*caml_leave_blocking_section_hook)(void);
+
+caml_domain_state *caml_try_get_caml_state(void);
+/* This function returns NULL if the current thread does not hold any
+   domain lock, otherwise it returns the pointer to the domain state
+   of which it holds the lock. This function can be called from any
+   thread including unregistered C threads. */
+
 #endif /* CAML_INTERNALS */
 
 #ifdef __cplusplus
