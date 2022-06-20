@@ -126,13 +126,12 @@ CAMLextern uintnat caml_real_page_size;
 
 // can support 57 bits one day
 #define Pagetable_significant_bits 48
-// TODO: might be better at 1GB (L4 idx + L3 idx)
-#define Pagetable_entry_log 28 // 256MB
+#define Pagetable_entry_log 26 // 64MB
 
 #else
 
 #define Pagetable_significant_bits 32
-#define Pagetable_entry_log (Page_log + 2) // 16KB
+#define Pagetable_entry_log 22 // 4MB
 
 #endif /* ARCH_SIXTYFOUR */
 
