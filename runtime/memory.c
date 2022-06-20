@@ -54,7 +54,7 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 atomic_char *caml_heap_table = NULL;
 uintnat caml_real_page_size = 0;
 
-#define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log) // 20
+#define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log)
 #define Pagetable_size (((int)1 << Pagetable_log))
 
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
@@ -69,10 +69,10 @@ static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 int caml_page_table_initialize(mlsize_t bytesize)
 {
 #if PAGE_TABLE_ON_DEMAND
-  // 2^(Pagetable_log - Page_log) = 1MB paged on demand.
+  // Pagetable_size paged on demand.
   int prot = PROT_NONE;
 #else
-  // 2^(Pagetable_log - Page_log) = 1MB initially mapped to the zero
+  // Pagetable_size initially mapped to the zero
   // page and:
   // - allocated on demand if overcommitting is enabled,
   // - committed up-front otherwise.
@@ -130,7 +130,8 @@ static int page_table_commit(intnat start, intnat end)
    async-signal-safe. Returns 1 if the fault is due to a naked pointer
    caught for the first time inside the address space described by
    this caml_heap_table page. Returns 0 if the fault is unrelated.
-   Happens less than 255 times over the execution of a program.
+   Happens less than 2^(Pagetable_log - Page_log) times over the
+   execution of a program.
 */
 int caml_page_table_fault(void *addr)
 {
