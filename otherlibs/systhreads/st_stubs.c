@@ -88,8 +88,8 @@ struct caml_thread_struct {
 
 typedef struct caml_thread_struct* caml_thread_t;
 
-/* Thread-local key for accessing the current thread's [caml_thread_t] */
-st_tlskey caml_thread_key;
+/* The current thread's [caml_thread_t] */
+static _Thread_local caml_thread_t this_thread;
 
 /* overall table for threads across domains */
 struct caml_thread_table {
@@ -210,7 +210,7 @@ static void caml_thread_leave_blocking_section(void)
   st_masterlock_acquire(&Thread_main_lock);
   /* Update Active_thread to point to the thread descriptor corresponding to
      the thread currently executing */
-  Active_thread = st_tls_get(caml_thread_key);
+  Active_thread = this_thread;
   /* Restore the runtime state from the curr_thread descriptor */
   caml_thread_restore_runtime_state();
 }
@@ -359,7 +359,7 @@ CAMLprim value caml_thread_initialize_domain(value v)
   new_thread->prev = new_thread;
   new_thread->backtrace_last_exn = Val_unit;
 
-  st_tls_set(caml_thread_key, new_thread);
+  this_thread = new_thread;
 
   Active_thread = new_thread;
   Tick_thread_running = 0;
@@ -396,9 +396,6 @@ CAMLprim value caml_thread_initialize(value unit)
   if (!caml_domain_alone())
     caml_failwith("caml_thread_initialize: cannot initialize Thread "
                   "while several domains are running.");
-
-  /* Initialize the key to the [caml_thread_t] structure */
-  st_tls_newkey(&caml_thread_key);
 
   /* First initialise the systhread chain on this domain */
   caml_thread_initialize_domain(Val_unit);
@@ -464,10 +461,10 @@ static void * caml_thread_start(void * v)
 
   caml_init_domain_self(th->domain_id);
 
-  st_tls_set(caml_thread_key, th);
+  this_thread = th;
 
   st_masterlock_acquire(&Thread_main_lock);
-  Active_thread = st_tls_get(caml_thread_key);
+  Active_thread = this_thread;
   caml_thread_restore_runtime_state();
 
 #ifdef POSIX_SIGNALS
@@ -572,7 +569,7 @@ CAMLexport int caml_c_thread_register(void)
   if (Caml_state == NULL) {
     caml_init_domain_self(0);
   };
-  if (st_tls_get(caml_thread_key) != NULL) return 0;
+  if (this_thread != NULL) return 0;
   /* Take master lock to protect access to the runtime */
   st_masterlock_acquire(&Thread_main_lock);
   /* Create a thread info block */
@@ -594,7 +591,7 @@ CAMLexport int caml_c_thread_register(void)
     Active_thread->next = th;
   }
   /* Associate the thread descriptor with the thread */
-  st_tls_set(caml_thread_key, (void *) th);
+  this_thread = th;
   /* Allocate the thread descriptor on the heap */
   th->descr = caml_thread_new_descriptor(Val_unit);  /* no closure */
 
@@ -619,13 +616,13 @@ CAMLexport int caml_c_thread_unregister(void)
   /* If Caml_state is not set, this thread was likely not registered */
   if (Caml_state == NULL) return 0;
 
-  th = st_tls_get(caml_thread_key);
+  th = this_thread;
   /* Not registered? */
   if (th == NULL) return 0;
   /* Wait until the runtime is available */
   st_masterlock_acquire(&Thread_main_lock);
   /*  Forget the thread descriptor */
-  st_tls_set(caml_thread_key, NULL);
+  this_thread = NULL;
   /* Remove thread info block from list of threads, and free it */
   caml_thread_remove_info(th);
 
@@ -683,7 +680,7 @@ CAMLprim value caml_thread_yield(value unit)
   caml_raise_if_exception(caml_process_pending_signals_exn());
   caml_thread_save_runtime_state();
   st_thread_yield(&Thread_main_lock);
-  Active_thread = st_tls_get(caml_thread_key);
+  Active_thread = this_thread;
   caml_thread_restore_runtime_state();
   caml_raise_if_exception(caml_process_pending_signals_exn());
 
