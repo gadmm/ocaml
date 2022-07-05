@@ -1026,9 +1026,9 @@ static void install_backup_thread (dom_internal* di)
   }
 }
 
-static void caml_domain_initialize_default(void)
+static int caml_domain_initialize_default(void)
 {
-  return;
+  return 1;
 }
 
 static void caml_domain_stop_default(void)
@@ -1041,7 +1041,7 @@ static void caml_domain_external_interrupt_hook_default(void)
   return;
 }
 
-CAMLexport void (*caml_domain_initialize_hook)(void) =
+CAMLexport int (*caml_domain_initialize_hook)(void) =
    caml_domain_initialize_default;
 
 CAMLexport void (*caml_domain_stop_hook)(void) =
