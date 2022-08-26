@@ -182,7 +182,9 @@ DECLARE_SIGNAL_HANDLER(trap_handler)
 #error "CONTEXT_SP is required if HAS_STACK_OVERFLOW_DETECTION is defined"
 #endif
 
-static char sig_alt_stack[SIGSTKSZ];
+#define MY_SIGSTKSZ (2 * 8192)
+
+static char sig_alt_stack[MY_SIGSTKSZ];
 
 /* Code compiled with ocamlopt never accesses more than
    EXTRA_STACK bytes below the stack pointer. */
@@ -289,7 +291,7 @@ void caml_init_signals(void)
     stack_t stk;
     struct sigaction act;
     stk.ss_sp = sig_alt_stack;
-    stk.ss_size = SIGSTKSZ;
+    stk.ss_size = MY_SIGSTKSZ;
     stk.ss_flags = 0;
     SET_SIGACT(act, segv_handler);
     act.sa_flags |= SA_ONSTACK | SA_NODEFER;
@@ -303,8 +305,8 @@ CAMLexport void caml_setup_stack_overflow_detection(void)
 {
 #ifdef POSIX_SIGNALS
   stack_t stk;
-  stk.ss_sp = malloc(SIGSTKSZ);
-  stk.ss_size = SIGSTKSZ;
+  stk.ss_sp = malloc(MY_SIGSTKSZ);
+  stk.ss_size = MY_SIGSTKSZ;
   stk.ss_flags = 0;
   if (stk.ss_sp)
     sigaltstack(&stk, NULL);
