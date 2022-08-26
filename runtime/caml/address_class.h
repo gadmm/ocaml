@@ -179,9 +179,12 @@ inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
   intnat p = Pagetable_entry(v);
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
-  if (LIKELY(e & In_heap)) return 1;
-  if (LIKELY(e != 0)) return 0;
-  return caml_heap_table_get_sync(p) & In_heap;
+  /*
+    - We assume that synchronisation follows from dependency ordering
+      on Arm & Power (cf. Linux kernel memory model).
+    - We do not "taint" pages containing out of heap pointers.
+  */
+  return LIKELY(e & In_heap);
 }
 
 int caml_page_table_fault(void *addr);
