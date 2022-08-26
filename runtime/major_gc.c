@@ -609,13 +609,6 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
-#ifdef NO_NAKED_POINTERS
-Caml_inline uintnat rotate1(uintnat x)
-{
-  return (x << ((sizeof x)*8 - 1)) | (x >> 1);
-}
-#endif
-
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -632,14 +625,12 @@ Caml_noinline static intnat do_some_marking
   struct mark_stack stk = *Caml_state->mark_stack;
 #ifndef NO_NAKED_POINTERS
   atomic_char *heap_table = caml_heap_table;
-#endif
-
-#ifdef NO_NAKED_POINTERS
-  uintnat young_start = (uintnat)Caml_state->young_alloc_start;
-  uintnat half_young_len = ((uintnat)Caml_state->young_alloc_end
-                            - (uintnat)Caml_state->young_alloc_start) >> 1;
-#define Is_block_and_not_young(v) \
-  (((intnat)rotate1((uintnat)v - young_start)) >= (intnat)half_young_len)
+#define Is_markable(v) caml_in_heap_cached(v, heap_table)
+#else
+  uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
+  uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
+#define Is_not_young(v) (((uintnat)v - young_start) >= young_len)
+#define Is_markable(v) Is_not_young(v)
 #endif
 
 #ifdef CAML_INSTR
@@ -715,11 +706,7 @@ Caml_noinline static intnat do_some_marking
 #ifdef CAML_INSTR
       slice_fields ++;
 #endif
-#ifdef NO_NAKED_POINTERS
-      if (Is_block_and_not_young(v)) {
-#else
-      if (Is_block(v) && caml_in_heap_cached(v, heap_table)) {
-#endif
+      if (Is_block(v) && Is_markable(v)) {
 #ifdef CAML_INSTR
         slice_pointers ++;
 #endif
