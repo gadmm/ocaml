@@ -610,11 +610,6 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
-Caml_inline uintnat rotate1(uintnat x)
-{
-  return (x << ((sizeof x)*8 - 1)) | (x >> 1);
-}
-
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -629,16 +624,15 @@ Caml_noinline static intnat do_some_marking
   /* These global values are cached in locals,
      so that they can be stored in registers */
   struct mark_stack stk = *Caml_state->mark_stack;
-  uintnat young_start = (uintnat)Val_hp(Caml_state->young_alloc_start);
-  uintnat half_young_len =
-    ((uintnat)Caml_state->young_alloc_end -
-     (uintnat)Caml_state->young_alloc_start) >> 1;
-#define Is_block_and_not_young(v) \
-  (((intnat)rotate1((uintnat)v - young_start)) >= (intnat)half_young_len)
-#ifdef NO_NAKED_POINTERS
-  #define Is_major_block(v) Is_block_and_not_young(v)
+#ifndef NO_NAKED_POINTERS
+  atomic_char *heap_table = caml_heap_table;
+#define Is_markable(v)                                                \
+  CAMLlikely(caml_classify_address(heap_table, (void *)v) & In_heap)
 #else
-  #define Is_major_block(v) (Is_block_and_not_young(v) && Is_in_heap(v))
+  uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
+  uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
+#define Is_not_young(v) (((uintnat)v - young_start) >= young_len)
+#define Is_markable(v) Is_not_young(v)
 #endif
 
 #ifdef CAML_INSTR
@@ -714,16 +708,19 @@ Caml_noinline static intnat do_some_marking
 #ifdef CAML_INSTR
       slice_fields ++;
 #endif
-      if (Is_major_block(v)) {
+      if (Is_block(v) && Is_markable(v)) {
 #ifdef CAML_INSTR
         slice_pointers ++;
 #endif
-        if (pb_enqueued == pb_dequeued + Pb_size) {
+        if (CAMLunlikely(pb_enqueued == pb_dequeued + Pb_size)) {
           /* Prefetch buffer is full */
           work += scan_end - scan; /* scanning work not done */
           break;
         }
         prefetch_block(v);
+        /* Load-to-store control dependency with Is_markable(v). See
+           Paul E. McKenney, "Is Parallel Programming Hard, And, If
+           So, What Can You Do About It?", Section 15.3.3. */
         pb[(pb_enqueued++) & Pb_mask] = v;
       }
 #if defined(NAKED_POINTERS_CHECKER) && defined(NATIVE_CODE)
