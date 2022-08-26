@@ -148,14 +148,6 @@ int caml_is_in_static_data(void *a);
 Caml_inline char caml_heap_table_get_sync(intnat p)
 {
   char e = 0;
-  /* This measures the cost of synchronisation in multicore: the
-     current branch occurs infrequently-enough (at most once per
-     visited heap table entry per domain, by monotonicity of the page
-     table) that the cost of the atomic operation itself would be
-     negligible. But we also have to count code layout, branch
-     mispredictions, etc. which could affect performance. We can
-     already measure these and see that their effect is negligible if
-     any. */
   if (atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
                                               Unmanaged, memory_order_acq_rel,
                                               memory_order_acquire)) {
@@ -178,9 +170,12 @@ Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
   intnat p = Pagetable_entry(v);
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
-  if (CAMLlikely(e & In_heap)) return 1;
-  if (CAMLlikely(e != 0)) return 0;
-  return caml_heap_table_get_sync(p) & In_heap;
+  /*
+    - We assume that synchronisation follows from dependency ordering
+      on Arm & Power (cf. Linux kernel memory model).
+    - We do not "taint" pages containing out of heap pointers.
+  */
+  return CAMLlikely(e & In_heap);
 }
 
 int caml_page_table_fault(void *addr);
