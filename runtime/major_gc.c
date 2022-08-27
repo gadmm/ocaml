@@ -630,7 +630,7 @@ Caml_noinline static intnat do_some_marking
   uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
   uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
 #define Is_not_young(v) (((uintnat)v - young_start) >= young_len)
-#define Is_markable(v) Is_not_young(v)
+#define Is_markable(v) (Is_block(v) && Is_not_young(v))
 #endif
 
   while (1) {
@@ -697,7 +697,7 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
-      if (Is_block(v) && Is_markable(v)) {
+      if (Is_markable(v)) {
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */

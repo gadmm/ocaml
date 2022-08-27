@@ -68,7 +68,7 @@ static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-#if PAGE_TABLE_ON_DEMAND
+#if 0 && PAGE_TABLE_ON_DEMAND
   // 2^(Pagetable_log - Page_log) = 1MB paged on demand.
   int prot = PROT_NONE;
 #else

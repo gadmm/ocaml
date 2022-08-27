@@ -177,7 +177,9 @@ inline int caml_classify_address(void *a)
 
 inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
-  intnat p = Pagetable_entry(v);
+  int imm = !Is_block(v);
+  intnat i = Pagetable_entry(v);
+  intnat p = imm ? 0 : i; // cmov
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
   /*
     - We assume that synchronisation follows from dependency ordering
