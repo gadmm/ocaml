@@ -181,7 +181,7 @@ DECLARE_SIGNAL_HANDLER(trap_handler)
 #error "CONTEXT_SP is required if HAS_STACK_OVERFLOW_DETECTION is defined"
 #endif
 
-static char sig_alt_stack[SIGSTKSZ];
+static char sig_alt_stack[2 * 8192];
 
 /* Code compiled with ocamlopt never accesses more than
    EXTRA_STACK bytes below the stack pointer. */
