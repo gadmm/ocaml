@@ -68,7 +68,7 @@ static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-#if PAGE_TABLE_ON_DEMAND
+#if 0 && PAGE_TABLE_ON_DEMAND
   // 2^(Pagetable_log - Page_log) = 1MB paged on demand.
   int prot = PROT_NONE;
 #else
@@ -88,6 +88,15 @@ int caml_page_table_initialize(mlsize_t bytesize)
   CAMLassert(caml_real_page_size >= Page_size);
   return 0;
   // TODO: free on shutdown
+}
+
+void print_heap_table()
+{
+  char *table = (char *)caml_heap_table - (Pagetable_size / 2);
+  for (char *i = table; i < table + Pagetable_size; i++) {
+    char e = *i;
+    if (e != 0) fprintf(stderr, "%ld: %d\n", i - (char *)caml_heap_table, e);
+  }
 }
 
 #define CAMLassert_aligned_(n, m)                     \
@@ -153,6 +162,8 @@ int caml_page_table_fault(void *addr)
   return 0;
 }
 
+uintnat caml_heap_min_address = (uintnat)-1;
+
 // Assumes that the caller owns the mapping from start to end, to
 // ensure that we are not racing to set the same entry twice.
 // Idempotent (returns 0 even if some page table entries are already
@@ -187,6 +198,8 @@ int caml_page_table_add(int kind, void * start, void * end)
       // declared their pages of interest in advances).
       if (e != kind) ret = -1;
   }
+  if (ret != -1 && kind == In_heap && (uintnat)start < caml_heap_min_address)
+    caml_heap_min_address = (uintnat)start;
   return ret;
 }
 

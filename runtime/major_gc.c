@@ -609,6 +609,15 @@ Caml_inline void prefetch_block(value v)
   caml_prefetch(&Field(v, 3));
 }
 
+#ifndef NO_NAKED_POINTERS
+Caml_inline uintnat rotate1(uintnat x)
+{
+  return (x << ((sizeof x)*8 - 1)) | (x >> 1);
+}
+#endif
+
+void print_heap_table();
+
 Caml_noinline static intnat do_some_marking
 #ifndef CAML_INSTR
   (intnat work)
@@ -625,12 +634,24 @@ Caml_noinline static intnat do_some_marking
   struct mark_stack stk = *Caml_state->mark_stack;
 #ifndef NO_NAKED_POINTERS
   atomic_char *heap_table = caml_heap_table;
-#define Is_markable(v) caml_in_heap_cached(v, heap_table)
+  intnat min_heap = (intnat)rotate1(caml_heap_min_address);
+#define Is_block_and_maybe_in_heap(v)           \
+  ((intnat)(rotate1((uintnat)(v))) >= min_heap)
+#define Is_markable(v)                                                  \
+  (Is_block_and_maybe_in_heap(v) && caml_in_heap_cached(v, heap_table))
+/*#ifdef NATIVE_CODE
+  print_heap_table();
+  caml_fatal_error("caml_heap_min_address %ld",
+                   Pagetable_entry(caml_heap_min_address));
+#endif*/
+  CAMLassert(!Is_block_and_maybe_in_heap(Val_none));
+  CAMLassert(Is_block_and_maybe_in_heap(caml_heap_min_address));
+  CAMLassert(!Is_block_and_maybe_in_heap(caml_heap_min_address - 1));
 #else
   uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
   uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;
 #define Is_not_young(v) (((uintnat)v - young_start) >= young_len)
-#define Is_markable(v) Is_not_young(v)
+#define Is_markable(v) (Is_block(v) && Is_not_young(v))
 #endif
 
   while (1) {
@@ -697,7 +718,7 @@ Caml_noinline static intnat do_some_marking
     for (; scan < scan_end; scan++) {
       value v = *scan;
       CAML_EVENTLOG_DO({ (*slice_fields) ++; });
-      if (Is_block(v) && Is_markable(v)) {
+      if (Is_markable(v)) {
         CAML_EVENTLOG_DO({ (*slice_pointers) ++; });
         if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
           break; /* Prefetch buffer is full */

@@ -143,6 +143,7 @@ static_assert(Huge_page_log < Pagetable_entry_log, "invalid page sizes");
 static_assert(Page_log < Huge_page_log, "invalid page sizes");
 
 CAMLextern atomic_char *caml_heap_table;
+CAMLextern uintnat caml_heap_min_address;
 
 int caml_is_in_static_data(void *a);
 
