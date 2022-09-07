@@ -157,7 +157,6 @@ void caml_set_minor_heap_size (asize_t bsz)
   char *heap = (char *)Caml_state->young_alloc_start;
   CAMLassert (bsz >= Bsize_wsize(Minor_heap_min));
   CAMLassert (bsz <= Bsize_wsize(Minor_heap_max));
-  CAMLassert (bsz % Page_size == 0);
   CAMLassert (bsz % sizeof (value) == 0);
   if (Caml_state->young_ptr != Caml_state->young_alloc_end){
     CAML_EV_COUNTER (EV_C_FORCE_MINOR_SET_MINOR_HEAP_SIZE, 1);
@@ -167,9 +166,7 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
-#ifdef DO_NOT_SIMULATE_412_BEHAVIOUR
   bsz = caml_round_up_to_huge_page(bsz);
-#endif
   if (Caml_state->young_reserved < bsz) {
     // Reallocate the minor heap
     if (-1 == realloc_minor_heap(bsz, &heap, &Caml_state->young_reserved))
