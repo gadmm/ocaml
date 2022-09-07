@@ -113,11 +113,7 @@ CAMLextern uintnat caml_real_page_size;
      i386 -> 4MB
      ppc64 -> 64MB
 */
-#ifdef DO_NOT_SIMULATE_412_BEHAVIOUR
 #define Huge_page_log 21 // 2MB
-#else
-#define Huge_page_log 22 // 4MB (HUGE_PAGE_SIZE in 4.12)
-#endif
 #define Huge_page_size ((uintnat)1 << Huge_page_log)
 
 /* Page table: bitmap */
