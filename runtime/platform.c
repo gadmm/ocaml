@@ -36,7 +36,7 @@
    pages. This is set when parsing [OCAMLRUNPARAM] and must stay
    constant after that.
 */
-uintnat caml_use_huge_pages = 0;
+uintnat caml_use_huge_pages = 1;
 
 uintnat caml_real_page_size = Page_size;
 static bool caml_os_overcommit = false;
