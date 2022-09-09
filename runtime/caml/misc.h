@@ -150,16 +150,27 @@ CAMLdeprecated_typedef(addr, char *);
 #error "How do I align values on this platform?"
 #endif
 
-/* Prefetching */
+/* Expecting */
+#ifdef __GNUC__
+#define CAMLlikely(e)   __builtin_expect(!!(e), 1)
+#define CAMLunlikely(e) __builtin_expect(!!(e), 0)
+#else
+#define CAMLlikely(e) (e)
+#define CAMLunlikely(e) (e)
+#endif
 
 #ifdef CAML_INTERNALS
+
+/* Prefetching */
 #if defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
 #define caml_prefetch(p) __builtin_prefetch((p), 1, 3)
 /* 1 = intent to write; 3 = all cache levels */
 #else
 #define caml_prefetch(p)
 #endif
-#endif
+
+#endif /* CAML_INTERNALS */
+
 
 /* CAMLunused is preserved for compatibility reasons.
    Instead of the legacy GCC/Clang-only
