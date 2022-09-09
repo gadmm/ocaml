@@ -150,6 +150,14 @@ CAMLdeprecated_typedef(addr, char *);
 #error "How do I align values on this platform?"
 #endif
 
+/* Expecting */
+#ifdef __GNUC__
+#define CAMLlikely(e)   __builtin_expect(!!(e), 1)
+#define CAMLunlikely(e) __builtin_expect(!!(e), 0)
+#else
+#define CAMLlikely(e) (e)
+#define CAMLunlikely(e) (e)
+#endif
 
 #ifdef CAML_INTERNALS
 
@@ -159,15 +167,6 @@ CAMLdeprecated_typedef(addr, char *);
 /* 1 = intent to write; 3 = all cache levels */
 #else
 #define caml_prefetch(p)
-#endif
-
-/* Expecting */
-#if defined(__GNUC__)
-#define LIKELY(a) __builtin_expect(!!(a),1)
-#define UNLIKELY(a) __builtin_expect(!!(a),0)
-#else
-#define LIKELY(a) (a)
-#define UNLIKELY(a) (a)
 #endif
 
 #endif /* CAML_INTERNALS */

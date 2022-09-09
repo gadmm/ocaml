@@ -138,14 +138,14 @@ CAMLextern uintnat caml_real_page_size;
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
 #define Pagetable_entry(p) ((intnat)(p) >> Pagetable_entry_log)
 
-static_assert(Huge_page_log < Pagetable_entry_log, "invalid page sizes");
+static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 static_assert(Page_log < Huge_page_log, "invalid page sizes");
 
 CAMLextern atomic_char *caml_heap_table;
 
 int caml_is_in_static_data(void *a);
 
-inline char caml_heap_table_get_sync(intnat p)
+Caml_inline char caml_heap_table_get_sync(intnat p)
 {
   char e = 0;
   /* This measures the cost of synchronisation in multicore: the
@@ -166,20 +166,20 @@ inline char caml_heap_table_get_sync(intnat p)
   }
 }
 
-inline int caml_classify_address(void *a)
+Caml_inline int caml_classify_address(void *a)
 {
   intnat p = Pagetable_entry(a);
   char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
-  if (LIKELY(e != 0)) return e;
+  if (CAMLlikely(e != 0)) return e;
   return caml_heap_table_get_sync(p);
 }
 
-inline int caml_in_heap_cached(value v, atomic_char *heap_table)
+Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
   intnat p = Pagetable_entry(v);
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
-  if (LIKELY(e & In_heap)) return 1;
-  if (LIKELY(e != 0)) return 0;
+  if (CAMLlikely(e & In_heap)) return 1;
+  if (CAMLlikely(e != 0)) return 0;
   return caml_heap_table_get_sync(p) & In_heap;
 }
 
