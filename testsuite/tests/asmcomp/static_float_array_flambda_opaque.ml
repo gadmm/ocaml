@@ -7,7 +7,7 @@
    **** native
 *)
 
-external is_in_static_data : 'a -> bool = "caml_is_in_static_data"
+external is_in_static_data : 'a -> bool = "is_in_static_data"
 
 let a = [|0.; 1.|]
 let f = 1.23

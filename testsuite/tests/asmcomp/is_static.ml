@@ -6,7 +6,7 @@
 
 (* Data that should be statically allocated by the compiler (all versions) *)
 
-external is_in_static_data : 'a -> bool = "caml_is_in_static_data"
+external is_in_static_data : 'a -> bool = "is_in_static_data"
 
 (* Basic constant blocks should be static *)
 let block1 = (1,2)
