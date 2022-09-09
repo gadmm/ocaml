@@ -7,7 +7,7 @@
 
 (* Data that should be statically allocated by the compiler (flambda only) *)
 
-external is_in_static_data : 'a -> bool = "caml_is_in_static_data"
+external is_in_static_data : 'a -> bool = "is_in_static_data"
 
 (* Also after inlining *)
 let g x =
