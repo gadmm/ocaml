@@ -723,7 +723,7 @@ Caml_noinline static intnat do_some_marking
 #ifdef CAML_INSTR
         slice_pointers ++;
 #endif
-        if (UNLIKELY(pb_enqueued == pb_dequeued + Pb_size)) {
+        if (CAMLunlikely(pb_enqueued == pb_dequeued + Pb_size)) {
           /* Prefetch buffer is full */
           work += scan_end - scan; /* scanning work not done */
           break;
