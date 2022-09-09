@@ -60,7 +60,7 @@ uintnat caml_real_page_size = 0;
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 
 // TODO: better portability of on-demand paging
-#if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS))
+#if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS) && defined(ARCH_SIXTYFOUR))
 #define PAGE_TABLE_ON_DEMAND 1
 #else
 #define PAGE_TABLE_ON_DEMAND 0
@@ -408,7 +408,8 @@ static void pa_add_free(page_allocator *pa, char *block, asize_t size)
 
 static int pa_find_address(page_allocator *pa, char *block, asize_t *size_out)
 {
-  return caml_skiplist_find(&pa->free_per_address_sk, (uintnat)block, size_out);
+  return caml_skiplist_find(&pa->free_per_address_sk,
+                            (uintnat)block, (uintnat *)size_out);
 }
 
 Caml_inline int pa_find_below_address(page_allocator *pa, char *addr,
@@ -416,7 +417,7 @@ Caml_inline int pa_find_below_address(page_allocator *pa, char *addr,
 {
   uintnat address;
   if (caml_skiplist_find_below(&pa->free_per_address_sk, (uintnat)addr,
-                               &address, size_out)) {
+                               &address, (uintnat *)size_out)) {
     *block_out = (char *)address;
     return 1;
   }
@@ -501,7 +502,7 @@ CAMLunused_end
       asize_t size = var->data;
       fprintf(stderr, "(%p, %d pages)", beg, (int)(size / PA_page_size(pa)));
       if (!caml_skiplist_find(&pa->free_per_size_sk,
-                              pa_size_key(pa, beg, size), &size)
+                              pa_size_key(pa, beg, size), (uintnat *)&size)
           && size != var->data)
         fprintf(stderr, "corrupt ");
       num++;
