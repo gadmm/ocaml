@@ -136,7 +136,7 @@ static int page_table_commit(intnat start, intnat end)
 int caml_page_table_fault(void *addr)
 {
   intnat p = (intnat)addr;
-  if (p >= (intnat)caml_heap_table - Pagetable_size/2 ||
+  if (p >= (intnat)caml_heap_table - Pagetable_size/2 &&
       p < (intnat)caml_heap_table + Pagetable_size/2) {
     int e = p - (intnat)caml_heap_table;
     // Allocate a page of the heap table.
