@@ -845,7 +845,7 @@ static void mark_slice (intnat work)
 #define SUFFIX ".log"
 #endif
       char * out_file_name =
-        "/tmp/ocaml-stats-page-table-412-stats+optims" SUFFIX;
+        "/tmp/ocaml-stats-page-table-412-stats+optims+force-huge-pages" SUFFIX;
       if (NULL == out_file_name) goto out;
       out_immediates_stats = fopen(out_file_name, "a");
       if (NULL == out_immediates_stats) goto out;
