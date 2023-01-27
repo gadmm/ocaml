@@ -16,10 +16,14 @@
 (*                                                                        *)
 (**************************************************************************)
 
+type 'a state =
+| Running
+| Finished of ('a, exn) result
+
 module Raw = struct
   (* Low-level primitives provided by the runtime *)
   type t = private int
-  external spawn : (unit -> unit) -> Mutex.t -> t
+  external spawn : ((unit -> 'a state) * Mutex.t * Condition.t * 'a state ref) -> t
     = "caml_domain_spawn"
   external self : unit -> t
     = "caml_ml_domain_id"
@@ -32,10 +36,6 @@ end
 let cpu_relax () = Raw.cpu_relax ()
 
 type id = Raw.t
-
-type 'a state =
-| Running
-| Finished of ('a, exn) result
 
 type 'a t = {
   domain : Raw.t;
@@ -199,8 +199,7 @@ let spawn f =
       match
         DLS.create_dls ();
         DLS.set_initial_keys pk;
-        let res = f () in
-        res
+        f ()
       with
       | x -> Ok x
       | exception ex -> Error ex
@@ -225,35 +224,27 @@ let spawn f =
               result
           end
     in
-
-    (* Synchronize with joining domains *)
-    Mutex.lock term_mutex;
-    match !term_state with
-    | Running ->
-        term_state := Finished result';
-        Condition.broadcast term_condition;
-    | Finished _ ->
-        failwith "internal error: Am I already finished?"
-    (* [term_mutex] is unlocked in the runtime after the cleanup functions on
-       the C side are finished. *)
+    Finished result'
   in
-  { domain = Raw.spawn body term_mutex;
+  { domain = Raw.spawn (body, term_mutex, term_condition, term_state);
     term_mutex;
     term_condition;
     term_state }
 
 let join { term_mutex; term_condition; term_state; _ } =
-  Mutex.lock term_mutex;
-  let rec loop () =
-    match !term_state with
-    | Running ->
-        Condition.wait term_condition term_mutex;
-        loop ()
-    | Finished res ->
-        Mutex.unlock term_mutex;
-        res
+  let res =
+    let& lock = Mutex.with_lock term_mutex in
+    let rec loop () =
+      match !term_state with
+      | Running ->
+          Condition.wait term_condition term_mutex;
+          loop ()
+      | Finished res ->
+          res
+    in
+    loop ()
   in
-  match loop () with
+  match res with
   | Ok x -> x
   | Error ex -> raise ex
 
