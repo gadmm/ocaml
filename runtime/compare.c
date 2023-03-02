@@ -109,7 +109,7 @@ static intnat compare_val(value v1, value v2, int total)
 #define GREATER 1
 #define UNORDERED ((intnat)1 << (8 * sizeof(value) - 1))
 
-/* Poll for actions, if there are any then this will
+/* Poll for actions, if any is performed then this will
    pessimistically free the stack and either return true
    to indicate that the comparison should be restarted,
    or will have raised an exception. */
@@ -120,16 +120,19 @@ static bool compare_poll_actions(struct compare_item** sp,
 {
   value o1 = *orig1, o2 = *orig2;
   if (caml_check_pending_actions()) {
-    compare_free_stack(stk);
     CAMLparam2(o1, o2);
-    value exn = caml_do_pending_actions_exn();
-    if (Is_exception_result(exn)) {
-      caml_raise(Extract_exception(exn));
+    value act = caml_do_pending_actions_exn();
+    if (act == Val_true || Is_exception_result(act)) {
+      compare_free_stack(stk);
+      if (Is_exception_result(act)) {
+        caml_raise(Extract_exception(act));
+      }
+      *v1 = *orig1 = o1;
+      *v2 = *orig2 = o2;
+      *sp = stk->stack = stk->init_stack;
+      CAMLreturnT(bool, true);
     }
-    *v1 = *orig1 = o1;
-    *v2 = *orig2 = o2;
-    *sp = stk->stack = stk->init_stack;
-    CAMLreturnT(bool, true);
+    CAMLdrop;
   }
   return false;
 }

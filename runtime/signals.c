@@ -294,6 +294,8 @@ CAMLexport int caml_check_pending_actions(void)
   return Caml_check_gc_interrupt(Caml_state) || Caml_state->action_pending;
 }
 
+/* Returns Val_false if no work has been done, otherwise Val_true or
+   an encoded exception. */
 value caml_do_pending_actions_exn(void)
 {
   Caml_state->action_pending = 0;

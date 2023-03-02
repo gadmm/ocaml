@@ -1553,9 +1553,10 @@ Caml_inline void advance_global_major_slice_epoch (caml_domain_state* d)
   }
 }
 
-void caml_poll_gc_work(void)
+bool caml_poll_gc_work(void)
 {
   CAMLalloc_point_here;
+  bool act = false;
 
   caml_domain_state* d = Caml_state;
 
@@ -1590,33 +1591,40 @@ void caml_poll_gc_work(void)
     /* out of minor heap or collection forced */
     d->requested_minor_gc = 0;
     caml_empty_minor_heaps_once();
+    act = true;
   }
 
   if (d->requested_major_slice) {
     CAML_EV_BEGIN(EV_MAJOR);
     d->requested_major_slice = 0;
     caml_major_collection_slice(AUTO_TRIGGERED_MAJOR_SLICE);
+    act = true;
     CAML_EV_END(EV_MAJOR);
   }
 
   if (atomic_load_acq(&d->requested_external_interrupt)) {
     caml_domain_external_interrupt_hook();
+    act = true;
   }
   caml_reset_young_limit(d);
+  return act;
 }
 
-void caml_handle_gc_interrupt(void)
+bool caml_handle_gc_interrupt(void)
 {
   CAMLalloc_point_here;
+  bool act = false;
 
   if (caml_incoming_interrupts_queued()) {
     /* interrupt */
     CAML_EV_BEGIN(EV_INTERRUPT_REMOTE);
     caml_handle_incoming_interrupts();
     CAML_EV_END(EV_INTERRUPT_REMOTE);
+    act = true;
   }
 
-  caml_poll_gc_work();
+  bool act2 = caml_poll_gc_work();
+  return act || act2;
 }
 
 CAMLexport int caml_bt_is_in_blocking_section(void)
