@@ -356,7 +356,7 @@ CAMLprim value caml_gc_counters(value v)
 
 CAMLprim value caml_gc_huge_fallback_count (value v)
 {
-  return Val_long (caml_huge_fallback_count);
+  return Val_long(0);
 }
 
 CAMLprim value caml_gc_get(value v)
@@ -397,13 +397,8 @@ static uintnat norm_pmax (uintnat p)
 
 static intnat norm_minsize (intnat s)
 {
-  intnat page_wsize = Wsize_bsize(Page_size);
   if (s < Minor_heap_min) s = Minor_heap_min;
   if (s > Minor_heap_max) s = Minor_heap_max;
-  /* PR#9128 : Make sure the minor heap occupies an integral number of
-     pages, so that no page contains both bytecode and OCaml
-     values. This would confuse, e.g., caml_hash. */
-  s = (s + page_wsize - 1) / page_wsize * page_wsize;
   return s;
 }
 

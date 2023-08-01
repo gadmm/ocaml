@@ -63,8 +63,6 @@ CAMLextern void caml_free_for_heap (char *mem);
 CAMLextern _Bool caml_add_to_heap (char *mem);
 #endif /* CAML_INTERNALS */
 
-CAMLextern int caml_huge_fallback_count;
-
 
 /* [caml_stat_*] functions below provide an interface to the static memory
    manager built into the runtime, which can be used for managing static
@@ -183,18 +181,6 @@ CAMLextern wchar_t* caml_stat_wcsconcat(int n, ...);
 /* void caml_shrink_heap (char *);        Only used in compact.c */
 
 #ifdef CAML_INTERNALS
-
-#ifdef HAS_HUGE_PAGES
-#include <sys/mman.h>
-#define Heap_page_size HUGE_PAGE_SIZE
-#define Round_mmap_size(x)                                      \
-    (((x) + (Heap_page_size - 1)) & ~ (Heap_page_size - 1))
-#endif
-
-
-int caml_page_table_add(int kind, void * start, void * end);
-int caml_page_table_remove(int kind, void * start, void * end);
-int caml_page_table_initialize(mlsize_t bytesize);
 
 #ifdef DEBUG
 #define DEBUG_clear(result, wosize) do{ \
