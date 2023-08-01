@@ -27,6 +27,7 @@
 #include "caml/minor_gc.h"
 #include "caml/misc.h"
 #include "caml/mlvalues.h"
+#include "caml/pages.h"
 #include "caml/roots.h"
 #include "caml/signals.h"
 #include "caml/weak.h"

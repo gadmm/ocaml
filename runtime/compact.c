@@ -26,6 +26,7 @@
 #include "caml/major_gc.h"
 #include "caml/memory.h"
 #include "caml/mlvalues.h"
+#include "caml/pages.h"
 #include "caml/roots.h"
 #include "caml/weak.h"
 #include "caml/compact.h"

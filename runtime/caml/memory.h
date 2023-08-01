@@ -181,20 +181,6 @@ CAMLextern wchar_t* caml_stat_wcsconcat(int n, ...);
 
 #ifdef CAML_INTERNALS
 
-extern uintnat caml_use_huge_pages;
-
-int caml_page_table_add(int kind, void * start, void * end);
-int caml_page_table_initialize(mlsize_t bytesize);
-
-// TODO: separate header
-asize_t caml_round_up_to_huge_page(asize_t size);
-int caml_mem_reserve(asize_t request, int kind,
-                     char **out_block, asize_t *out_reserved);
-int caml_mem_commit(char *block, asize_t request, asize_t *out_size);
-void caml_mem_decommit(char * block, asize_t size);
-int caml_mem_commit_os(char *block, asize_t size);
-void caml_mem_decommit_os(char * block, asize_t size);
-
 #ifdef DEBUG
 #define DEBUG_clear(result, wosize) do{ \
   uintnat caml__DEBUG_i; \

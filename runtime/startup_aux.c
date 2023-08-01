@@ -28,6 +28,7 @@
 #endif
 #include "caml/osdeps.h"
 #include "caml/startup_aux.h"
+#include "caml/pages.h"
 
 
 #ifdef _WIN32
