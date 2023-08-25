@@ -6,15 +6,16 @@
    The C stub itself contains more details on the mechanism. *)
 
 external test : int ref -> unit = "stub"
+external print_status : string -> int -> unit = "print_status_caml" [@@noalloc]
 
 let f () =
   let r = ref 42 in
   Gc.finalise (fun s -> r := !s) (ref 17);
-  Printf.printf "OCaml, before: %d\n%!" !r;
+  print_status "OCaml, before" !r;
   test r;
-  Printf.printf "OCaml, after: %d\n%!" !r;
+  print_status "OCaml, after" !r;
   ignore (Sys.opaque_identity (ref 100));
-  Printf.printf "OCaml, after alloc: %d\n%!" !r;
+  print_status "OCaml, after alloc" !r;
   ()
 
 let () = (f [@inlined never]) ()
