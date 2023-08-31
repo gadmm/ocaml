@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include "caml/address_class.h"
+#include "caml/pages.h"
 #include "caml/skiplist.h"
 
 uintnat caml_use_huge_pages = 1;

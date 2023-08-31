@@ -97,25 +97,6 @@
 #define In_young 2
 #define Unmanaged 4
 
-// Mask for the hardcoded page size (fast), used for static data
-#define Page_mask (~(Page_size - 1))
-
-// Real page size can be greater. (slower)
-CAMLextern uintnat caml_real_page_size;
-#define Real_page_size \
-  (CAMLassert(caml_real_page_size != 0), caml_real_page_size)
-#define Real_page_mask (~(Real_page_size - 1))
-
-/* There does not seem to be a way to ask the OS for the size of a
-   huge page. Legends tell that some systems have them larger than
-   2MB. Let's try:
-     x86-64, arm -> 2MB
-     i386 -> 4MB
-     ppc64 -> 64MB
-*/
-#define Huge_page_log 21 // 2MB
-#define Huge_page_size ((uintnat)1 << Huge_page_log)
-
 /* Page table: bibop */
 
 #ifdef ARCH_SIXTYFOUR
@@ -126,9 +107,6 @@ CAMLextern uintnat caml_real_page_size;
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
 #define Pagetable_entry(p) ((intnat)(p) >> Pagetable_entry_log)
-
-static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
-static_assert(Page_log < Huge_page_log, "invalid page sizes");
 
 CAMLextern atomic_char *caml_heap_table;
 
