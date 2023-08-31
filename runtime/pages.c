@@ -34,40 +34,76 @@ uintnat caml_use_huge_pages = 1;
 atomic_char *caml_heap_table = NULL;
 uintnat caml_real_page_size = 0;
 
+#ifdef ARCH_SIXTYFOUR
+
+/* Number of significant bits for pointers in the heap. Determines
+   reserved (not committed) area for page table; can support 57 bits
+   etc. */
+#define Pagetable_significant_bits 48
+
+#ifndef NO_NAKED_POINTER
+/* Determines area committed up-front for the page table. Should
+   remains at most 48 bits even on 57-bit address spaces as this is
+   all that is needed for backwards-compatibility (similarly we could
+   omit the kernel space, but we do not).
+
+   (This represents approx 4 MB mapped initially to the zero page.
+   This does not consume physical memory, and on overcommitting
+   systems does not count towards a memory limit.)
+
+   Can be set to zero if we require that page_table_commit or
+   caml_page_table_add is required to announce out-of-heap areas
+   beforehand. */
+#define Pagetable_initial_bits 48
+#else
+/* Commit the page table on demand; no need to support unannounced naked
+   pointers. */
+#define Pagetable_initial_bits 0
+#endif
+
+#else
+
+#define Pagetable_significant_bits 32
+#define Pagetable_initial_bits 32
+
+#endif /* ARCH_SIXTYFOUR */
+
 #define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log)
 #define Pagetable_size (((int)1 << Pagetable_log))
+#define Pagetable_initial_size                                  \
+  (((int)1 << (Pagetable_initial_bits - Pagetable_entry_log)))
 
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 
-// TODO: better portability of on-demand paging
-#if (defined(NATIVE_CODE) && defined(POSIX_SIGNALS) && defined(ARCH_SIXTYFOUR))
-#define PAGE_TABLE_ON_DEMAND 1
-#else
-#define PAGE_TABLE_ON_DEMAND 0
-#endif
+void caml_page_table_release(void)
+{
+  int ret = 0;
+  CAMLassert(caml_heap_table != NULL);
+  ret = munmap(caml_heap_table - (Pagetable_size / 2), Pagetable_size);
+  CAMLassert(ret != -1 || errno != EINVAL);
+  (void)ret;
+}
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-#if PAGE_TABLE_ON_DEMAND
-  // Pagetable_size paged on demand.
-  int prot = PROT_NONE;
-#else
-  // Pagetable_size initially mapped to the zero
-  // page and:
-  // - allocated on demand if overcommitting is enabled,
-  // - committed up-front otherwise.
-  // (bytecode)
-  int prot = PROT_READ | PROT_WRITE;
-#endif
+  int ret = 0;
   // TODO: win32
-  void *block = mmap(NULL, Pagetable_size, prot,
+  void *block = mmap(NULL, Pagetable_size, PROT_NONE,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (block == MAP_FAILED) return -1;
+  /* Kernel addresses are represented with negative offsets */
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
   caml_real_page_size = sysconf(_SC_PAGESIZE);
   CAMLassert(caml_real_page_size >= Page_size);
+  /* Commit initial portion */
+  ret = mprotect(caml_heap_table - (Pagetable_initial_size / 2),
+                 Pagetable_initial_size, PROT_READ | PROT_WRITE);
+  CAMLassert(ret != -1 || errno == ENOMEM);
+  if (ret == -1) goto err;
   return 0;
-  // TODO: free on shutdown
+ err:
+  caml_page_table_release();
+  return -1;
 }
 
 #define CAMLassert_aligned_(n, m)                     \
@@ -89,49 +125,24 @@ static intnat round_up(intnat n, intnat mod)
 /* This is called infrequently, and for a small portion of
    caml_heap_table, thanks to the hints given to mmap inside
    [caml_alloc_for_heap] which tends to reserve heap inside
-   already-committed pages of caml_heap_table. Must be
-   async-signal-safe.*/
+   already-committed pages of caml_heap_table. */
 static int page_table_commit(intnat start, intnat end)
 {
   int ret = 0;
-#if PAGE_TABLE_ON_DEMAND
   intnat page_start = round_down(start, Real_page_size);
   intnat page_end = round_up(end, Real_page_size);
   uintnat size = page_end - page_start;
+  if (page_start >= -(Pagetable_initial_size / 2)
+      && page_end <= Pagetable_initial_size / 2) {
+    /* Part of the initial portion already committed, avoid a
+       syscall. */
+    return 0;
+  }
   CAMLassert(page_start >= -(Pagetable_size / 2));
   CAMLassert(page_end <= Pagetable_size / 2);
   ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
   CAMLassert(ret != -1 || errno == ENOMEM);
-#endif
   return ret;
-}
-
-/* Function called from a signal handler. It must be
-   async-signal-safe. Returns 1 if the fault is due to a naked pointer
-   caught for the first time inside the address space described by
-   this caml_heap_table page. Returns 0 if the fault is unrelated.
-   Happens less than 2^(Pagetable_log - Page_log) times over the
-   execution of a program.
-*/
-int caml_page_table_fault(void *addr)
-{
-  intnat p = (intnat)addr;
-  if (p >= (intnat)caml_heap_table - Pagetable_size/2 &&
-      p < (intnat)caml_heap_table + Pagetable_size/2) {
-    int e = p - (intnat)caml_heap_table;
-    // Allocate a page of the heap table.
-    if (-1 == page_table_commit(e, e + 1)) {
-      // We assume that this call is safe because we cause the fault
-      // in places in the runtime that are safe for functions like
-      // malloc, printf... and the program execution will end
-      // immediately afterwards. We make the same assumption for the
-      // asserts inside page_table_commit.
-      caml_fatal_error("out of memory");
-    }
-    return 1;
-  }
-  // If outside of the page table, it is not ours
-  return 0;
 }
 
 // Assumes that the caller owns the mapping from start to end, to

@@ -119,16 +119,9 @@ CAMLextern uintnat caml_real_page_size;
 /* Page table: bibop */
 
 #ifdef ARCH_SIXTYFOUR
-
-// can support 57 bits one day
-#define Pagetable_significant_bits 48
 #define Pagetable_entry_log 26 // 64MB
-
 #else
-
-#define Pagetable_significant_bits 32
 #define Pagetable_entry_log 22 // 4MB
-
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
@@ -138,8 +131,6 @@ static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 static_assert(Page_log < Huge_page_log, "invalid page sizes");
 
 CAMLextern atomic_char *caml_heap_table;
-
-int caml_is_in_static_data(void *a);
 
 Caml_inline char caml_heap_table_get_sync(intnat p)
 {
@@ -174,10 +165,14 @@ Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
   return CAMLlikely(e & In_heap);
 }
 
-int caml_page_table_fault(void *addr);
+int caml_is_in_static_data(void *a);
 
 int caml_page_table_add(int kind, void * start, void * end);
 int caml_page_table_add_static_data(void * start, void * end);
+
+#ifdef CAML_INTERNALS
 int caml_page_table_initialize(mlsize_t bytesize);
+void caml_page_table_release(void);
+#endif
 
 #endif /* CAML_ADDRESS_CLASS_H */

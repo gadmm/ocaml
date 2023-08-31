@@ -194,6 +194,7 @@ CAMLexport void caml_shutdown(void)
 #if defined(_WIN32) && defined(NATIVE_CODE)
   caml_win32_unregister_overflow_detection();
 #endif
+  caml_page_table_release();
 
   shutdown_happened = 1;
 }
