@@ -382,8 +382,6 @@ int caml_page_table_add_static_data(void * start, void * end)
   if (-1 == caml_page_table_add(Unmanaged, start, end))
     return -1;
   static_area_insert(start, end);
-//  fprintf(stderr, "Static data: ");
-//  pa_debug(&static_area);
   return 0;
 }
 
@@ -408,8 +406,6 @@ int caml_heap_commit(asize_t request, char **out_block,
     // Now it should succeed
     pa_alloc(&heap_allocator, request, &block, &reserved) ?: CAMLassert(0);
   }
-//  fprintf(stderr, "Heap reserved: ");
-//  pa_debug(&heap_allocator);
   if (-1 == caml_mem_commit(block, request, &request)) goto err;
   *out_block = block;
   *out_size = request;
@@ -424,6 +420,4 @@ void caml_heap_decommit(char * block, asize_t size)
 {
   caml_mem_decommit(block, size);
   pa_merge(&heap_allocator, block, size);
-//  fprintf(stderr, "Heap reserved: ");
-//  pa_debug(&heap_allocator);
 }

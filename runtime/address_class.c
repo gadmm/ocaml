@@ -134,7 +134,8 @@ int caml_page_table_add(int kind, void * start, void * end)
       // It is currently a programming error to:
       // - Let foreign pointers be seen by the OCaml GC
       // - Release the underlying mapping of these pointers, so that
-      //   the same virtual space can later be acquired by the runtime.
+      //   the same virtual space can later be acquired by the OCaml
+      //   runtime.
       //
       // However we could relax these conditions for libraries that
       // are ready to declare their pages in advance, in that case
