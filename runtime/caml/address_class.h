@@ -53,6 +53,12 @@
 
    (To create a well-formed block outside the heap that the GC will
    not scan, one can use the Caml_out_of_heap_header from mlvalues.h.)
+
+   Note that contrary to expectations, without a page table the GC is
+   slightly slower, because an optimised page table check is
+   fast-enough that the time gained by not visiting static data for
+   marking becomes predominant. There is no good reason to use the
+   NO_NAKED_POINTERS mode nowadays.
 */
 
 #ifndef CAML_ADDRESS_CLASS_H
@@ -140,15 +146,17 @@ Caml_inline int caml_classify_address(void *a)
   return caml_heap_table_get_sync(p);
 }
 
+/*
+  - We assume that synchronisation follows from ordering of control
+    dependencies (Linux kernel memory model). See Paul E. McKenney, "Is
+    Parallel Programming Hard, And, If So, What Can You Do About It?",
+    Sections 15.2.5 & 15.3.3.
+  - We do not "taint" pages containing out of heap pointers.
+*/
 Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
   intnat p = Pagetable_entry(v);
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
-  /*
-    - We assume that synchronisation follows from dependency ordering
-      on Arm & Power (cf. Linux kernel memory model).
-    - We do not "taint" pages containing out of heap pointers.
-  */
   return CAMLlikely(e & In_heap);
 }
 

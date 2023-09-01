@@ -716,6 +716,9 @@ Caml_noinline static intnat do_some_marking
           break;
         }
         prefetch_block(v);
+        /* Load-to-store control dependency with Is_markable(v). See
+           Paul E. McKenney, "Is Parallel Programming Hard, And, If
+           So, What Can You Do About It?", Section 15.3.3. */
         pb[(pb_enqueued++) & Pb_mask] = v;
       }
 #if defined(NAKED_POINTERS_CHECKER) && defined(NATIVE_CODE)
