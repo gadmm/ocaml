@@ -40,7 +40,6 @@ extern uintnat caml_use_huge_pages;
 CAMLextern uintnat caml_real_page_size;
 #define Real_page_size \
   (CAMLassert(caml_real_page_size != 0), caml_real_page_size)
-#define Real_page_mask (~(Real_page_size - 1))
 
 /* There does not seem to be a way to ask the OS for the size of a
    huge page. Legends tell that some systems have them larger than
@@ -67,6 +66,21 @@ int caml_heap_commit(asize_t request, char **out_block,
                      asize_t *out_size, asize_t *out_reserved);
 void caml_heap_decommit(char * block, asize_t size);
 
+#define CAMLassert_aligned_(n, m)                     \
+  (CAMLassert(((uintnat)n & ((uintnat)m - 1)) == 0))
+#define CAMLassert_aligned(n, m)                          \
+  (CAMLassert_is_power_of_2(m),CAMLassert_aligned_(n,m))
+#define CAMLassert_is_power_of_2(n) CAMLassert_aligned_(n, n)
+
+Caml_inline intnat round_down(intnat n, intnat mod)
+{
+  return mod * (n / mod  - (n < 0 ? 1 : 0));
+}
+
+Caml_inline intnat round_up(intnat n, intnat mod)
+{
+  return round_down(n + mod - 1, mod);
+}
 
 #ifdef __cplusplus
 }
