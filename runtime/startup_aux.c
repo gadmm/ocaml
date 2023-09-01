@@ -195,6 +195,7 @@ CAMLexport void caml_shutdown(void)
   caml_win32_unregister_overflow_detection();
 #endif
   caml_page_table_release();
+  caml_mem_unreserve_all();
 
   shutdown_happened = 1;
 }

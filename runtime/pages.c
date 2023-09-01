@@ -36,7 +36,20 @@ uintnat caml_real_page_size = 0;
 
 static void mem_unmap_os(char *block, asize_t size)
 {
-  if (size != 0) munmap(block, size);
+  if (size != 0) {
+    int ret = munmap(block, size);
+    CAMLassert(ret != -1 || errno != EINVAL);
+    (void)ret;
+  }
+}
+
+static struct skiplist mmaped_areas = SKIPLIST_STATIC_INITIALIZER;
+
+void caml_mem_unreserve_all(void)
+{
+  FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
+      mem_unmap_os((char *)elem->key, (asize_t)elem->data);
+    });
 }
 
 /* Reserve memory, aligned at Pagetable_entry_size. [size] must be a
@@ -67,6 +80,7 @@ char * caml_mem_reserve_os(asize_t size)
   /* free end */
   mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
   /* [mem..mem+size[ is reserved */
+  caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
   last_mem = mem;
   last_size = size;
   return mem;
@@ -399,7 +413,6 @@ int caml_heap_commit(asize_t request, char **out_block,
     char *mem;
     asize_t new_reserve;
     // Reserve a large-enough space
-    // TODO: unmap on shutdown
     if (-1 == caml_mem_reserve(request, In_heap, &mem, &new_reserve))
       return -1;
     pa_merge(&heap_allocator, mem, new_reserve);

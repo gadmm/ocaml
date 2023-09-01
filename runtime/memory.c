@@ -49,7 +49,6 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 */
 char *caml_alloc_for_heap (asize_t request)
 {
-  // TODO: free on shutdown
   char *mem, *block;
   asize_t reserved, committed;
   request += sizeof(heap_chunk_head);
