@@ -59,6 +59,7 @@ int caml_mem_reserve(asize_t request, int kind,
                      char **out_block, asize_t *out_reserved);
 int caml_mem_commit(char *block, asize_t request, asize_t *out_size);
 void caml_mem_decommit(char * block, asize_t size);
+void caml_mem_unreserve_all(void);
 int caml_mem_commit_os(char *block, asize_t size);
 void caml_mem_decommit_os(char * block, asize_t size);
 
