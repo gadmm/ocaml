@@ -63,7 +63,8 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   if (block == MAP_FAILED) return NULL;
   // Prefer contiguous if possible, to avoid holes in the VAS
   if (block + request_virtual == last_mem) {
-    // On Linux, the mmaped area grows downwards
+    // This is likely to happen on Linux, where the mmaped area grows
+    // downwards
     mem = last_mem - size;
   } else {
     mem = (char *) round_up((uintnat)block, align);
@@ -88,7 +89,7 @@ static int madvise_os(char *block, asize_t size, int madvice)
   return err;
 }
 
-// can be used to recommit (does not destroy already-committed mapping)
+// can be used to recommit (preserves already-committed mapping)
 int caml_mem_commit_os(char *block, asize_t size)
 {
   // - Commit:

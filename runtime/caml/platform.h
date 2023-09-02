@@ -25,6 +25,7 @@
 #endif
 
 #include "config.h"
+#include "mlvalues.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,6 +45,9 @@ CAMLextern uintnat caml_real_page_size;
 */
 #define Huge_page_log 21 // 2MB
 #define Huge_page_size ((uintnat)1 << Huge_page_log)
+
+/* On Linux, mmap grows downwards */
+#define MMAP_GROWS_DOWN 1
 
 char *caml_mem_reserve_os(asize_t size, asize_t align);
 int caml_mem_commit_os(char *block, asize_t size);
