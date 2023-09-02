@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include "caml/address_class.h"
 #include "caml/pages.h"
+#include "caml/platform.h"
 
 /* Page table management */
 
@@ -60,6 +61,7 @@ atomic_char *caml_heap_table = NULL;
   (((int)1 << (Pagetable_initial_bits - Pagetable_entry_log)))
 
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
+static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
 void caml_page_table_release(void)
 {
