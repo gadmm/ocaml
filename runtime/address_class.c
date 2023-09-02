@@ -21,6 +21,7 @@
 #include <sys/mman.h>
 #include "caml/address_class.h"
 #include "caml/pages.h"
+#include "caml/page_allocator.h"
 #include "caml/platform.h"
 
 /* Page table management */
@@ -153,4 +154,38 @@ int caml_page_table_add(int kind, void * start, void * end)
       if (e != kind) ret = -1;
   }
   return ret;
+}
+
+/* Static data table */
+
+static page_allocator static_area = PA_STATIC_INITIALIZER(Page_log);
+
+int caml_is_in_static_data(void *addr)
+{
+  char *block;
+  asize_t size;
+  return caml_pa_find_below_address(&static_area, (char *)addr, &block, &size)
+    && (char *)addr < block + size;
+}
+
+#define Page_mask (~(Page_size - 1))
+
+static void static_area_insert(void * start, void * end)
+{
+  uintnat pstart = (uintnat)start & Page_mask;
+  uintnat pend = ((uintnat)end - 1) & Page_mask;
+  uintnat addr;
+  for (addr = pstart; addr <= pend; addr += Page_size) {
+    char *p = (char *)addr;
+    if (!caml_is_in_static_data(p))
+      caml_pa_merge(&static_area, p, Page_size);
+  }
+}
+
+int caml_page_table_add_static_data(void * start, void * end)
+{
+  if (-1 == caml_page_table_add(Unmanaged, start, end))
+    return -1;
+  static_area_insert(start, end);
+  return 0;
 }
