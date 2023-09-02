@@ -133,14 +133,14 @@ static void clear_table (struct generic_table *tbl)
     tbl->limit = tbl->threshold;
 }
 
-static int realloc_minor_heap(asize_t bsz, char **out_heap,
-                              asize_t *out_reserved)
+static int realloc_minor_heap(asize_t bsz)
 {
   char *new_heap;
   asize_t new_reserved;
+  asize_t new_bsz;
   if (-1 == caml_mem_reserve(bsz, In_young, &new_heap, &new_reserved))
     return -1;
-  if (-1 == caml_mem_commit(new_heap, bsz, &bsz))
+  if (-1 == caml_mem_commit(new_heap, bsz, &new_bsz))
     return -1;
   if (Caml_state->young_alloc_start != NULL) {
     caml_mem_decommit((char *)Caml_state->young_alloc_start,
@@ -148,8 +148,9 @@ static int realloc_minor_heap(asize_t bsz, char **out_heap,
     // Keep the old mapping reserved. The space reserved for the minor
     // heap cannot grow indefinitely.
   }
-  *out_heap = new_heap;
-  *out_reserved = new_reserved;
+  Caml_state->young_alloc_start = (value *) new_heap;
+  Caml_state->young_alloc_end = (value *) (new_heap + new_bsz);
+  Caml_state->young_reserved = new_reserved;
   return 0;
 }
 
@@ -167,25 +168,31 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
-  bsz = caml_round_up_to_huge_page(bsz);
+  /* [young_reserved] is at least aligned to [Pagetable_entry_size].
+     The new minor heap size is going to be rounded up to the huge
+     page size, which still fits due to alignment. */
   if (Caml_state->young_reserved < bsz) {
     // Reallocate the minor heap
-    if (-1 == realloc_minor_heap(bsz, &heap, &Caml_state->young_reserved))
+    if (-1 == realloc_minor_heap(bsz))
       goto oom;
   } else {
+    asize_t new_bsz;
     // Grow in place
-    if (-1 == caml_mem_commit_os(heap, bsz))
+    if (-1 == caml_mem_commit(heap, bsz, &new_bsz))
       goto oom;
-    caml_mem_decommit_os(heap + bsz, Caml_state->young_reserved - bsz);
+    caml_mem_decommit(heap + new_bsz, Caml_state->young_reserved - new_bsz);
+    Caml_state->young_alloc_end = (value *) (heap + new_bsz);
   }
-  Caml_state->young_alloc_start = (value *) heap;
-  Caml_state->young_alloc_end = (value *) (heap + bsz);
+  /* [young_alloc_start], [young_alloc_end], and [young_reserved] have
+     been succesfully updated. */
+  Caml_state->minor_heap_wsz =
+    Caml_state->young_alloc_end - Caml_state->young_alloc_start;
   Caml_state->young_alloc_mid =
-    Caml_state->young_alloc_start + Wsize_bsize (bsz) / 2;
+    Caml_state->young_alloc_start + Caml_state->minor_heap_wsz / 2;
   /* caml_update_young_limit called by caml_memprof_renew_minor_sample */
   Caml_state->young_trigger = Caml_state->young_alloc_start;
   Caml_state->young_ptr = Caml_state->young_alloc_end;
-  Caml_state->minor_heap_wsz = Wsize_bsize (bsz);
+
   caml_memprof_renew_minor_sample();
 
   reset_table ((struct generic_table *) Caml_state->ref_table);
@@ -193,6 +200,7 @@ void caml_set_minor_heap_size (asize_t bsz)
   reset_table ((struct generic_table *) Caml_state->custom_table);
   return;
 oom:
+  /* We did not touch the existing mapping */
   caml_raise_out_of_memory();
 }
 

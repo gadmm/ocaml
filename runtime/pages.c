@@ -22,7 +22,11 @@
 #include <sys/mman.h>
 #include "caml/address_class.h"
 #include "caml/pages.h"
+#include "caml/platform.h"
 #include "caml/skiplist.h"
+
+// Mask for the hardcoded page size (fast), used for static data
+#define Page_mask (~(Page_size - 1))
 
 uintnat caml_use_huge_pages = 1;
 /* True iff the program allocates heap chunks by mmapping huge pages.
@@ -30,134 +34,19 @@ uintnat caml_use_huge_pages = 1;
    after that.
 */
 
-uintnat caml_real_page_size = 0;
-
-/* Reservation, platform-specific */
-
-static void mem_unmap_os(char *block, asize_t size)
-{
-  if (size != 0) {
-    int ret = munmap(block, size);
-    CAMLassert(ret != -1 || errno != EINVAL);
-    (void)ret;
-  }
-}
-
-static struct skiplist mmaped_areas = SKIPLIST_STATIC_INITIALIZER;
-
-void caml_mem_unreserve_all(void)
-{
-  FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
-      mem_unmap_os((char *)elem->key, (asize_t)elem->data);
-    });
-}
-
-/* Reserve memory, aligned at Pagetable_entry_size. [size] must be a
-   multiple of Pagetable_entry_size. */
-char * caml_mem_reserve_os(asize_t size)
-{
-  // All platforms except win32. TODO: see golang for win32.
-  static char *last_mem = NULL;
-  static asize_t last_size = 0;
-  char *mem;
-  char *block;
-  asize_t request_virtual = size + Pagetable_entry_size;
-  CAMLassert_aligned(size, Pagetable_entry_size);
-  // Hint at the end of the previously-reserved block
-  block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
-               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (block == MAP_FAILED) return NULL;
-  // Prefer contiguous if possible, to avoid holes in the VAS
-  if (block + request_virtual == last_mem) {
-    // On Linux, the mmaped area grows downwards
-    mem = last_mem - size;
-  } else {
-    mem = (char *) round_up((uintnat)block, Pagetable_entry_size);
-  }
-  CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
-  /* free beginning */
-  mem_unmap_os(block, mem - block);
-  /* free end */
-  mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
-  /* [mem..mem+size[ is reserved */
-  caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
-  last_mem = mem;
-  last_size = size;
-  return mem;
-}
-
-static int madvise_os(char *block, asize_t size, int madvice)
-{
-  int err;
-  // EAGAIN is Linux-specific
-  while (-1 == (err = madvise(block, size, madvice)) && errno == EAGAIN) {};
-  return err;
-}
-
-// can be used to recommit (does not destroy already-committed mapping)
-int caml_mem_commit_os(char *block, asize_t size)
-{
-  // - Commit:
-  //    - Ensure it fails on OOM if overcommitting is off.
-  //    - MADV_FREE_REUSE on Darwin
-  //    - MADV_DODUMP, MADV_CORE. Darwin: none.
-  CAMLassert_aligned(block, Huge_page_size);
-  CAMLassert_aligned(size, Real_page_size);
-  if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
-  /* MADV_DODUMP: cancel MADV_DONTDUMP */
-  if (-1 == madvise_os(block, size, MADV_DODUMP)) return -1;
-#ifdef MADV_HUGEPAGE
-  if (caml_use_huge_pages) {
-    CAMLassert_aligned(size, Huge_page_size);
-    /* Request huge pages (THP) if huge pages are enabled. Note: this
-       can cause large pauses if /sys/kernel/mm/transparent_hugepage/defrag
-       is set to [always], [madvise] or [defer+madvise], since OCaml
-       will try to touch a lot of huge pages at once. [defer] is
-       preferred. */
-    if (-1 == madvise_os(block, size, MADV_HUGEPAGE)) return -1;
-    /* TODO:
-       - 1GB hugepage support.
-       - restore hugetlb behaviour for backwards-compat. */
-  }
-#endif
-  return 0;
-}
-
-void caml_mem_decommit_os(char * block, asize_t size)
-{
-  // - Decommit:
-  //    - MADV_DONTNEED on Linux with overcommitting, MADV_FREE on BSD
-  //      and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
-  //      fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
-  //    - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
-  //      overcommitting (see jemalloc,glibc malloc)
-  //      (https://github.com/bminor/glibc/commit/9fab36eb58)
-  //    - MADV_FREE exists on Linux, so be careful about #ifdef.
-  //    - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
-  //      core files, but seems to help gdb) Darwin: NONE
-  if (size == 0) return;
-  CAMLassert_aligned(block, Real_page_size);
-  CAMLassert_aligned(size, Real_page_size);
-  mprotect(block, size, PROT_NONE);
-  madvise_os(block, size, MADV_DONTNEED);
-  madvise_os(block, size, MADV_DONTDUMP);
-}
-
-
 /* Reserving, committing, decommitting. Platform-independent. */
 
 
 /* Round up to the nearest small page or huge page, depending on what
    is best. */
-asize_t caml_round_up_to_huge_page(asize_t size)
+static asize_t round_up_to_huge_page(asize_t size)
 {
-  asize_t page_size = caml_use_huge_pages ?
-    Huge_page_size : Real_page_size;
+  asize_t page_size = caml_use_huge_pages ? Huge_page_size : Real_page_size;
   return round_up(size, page_size);
 }
 
-// reserve at least [request] contiguous memory and record it with the
-// page table.
+// reserve at least [request] contiguous memory, rounded up to the
+// Pagetable_entry_size and record it with the page table.
 int caml_mem_reserve(asize_t request, int kind,
                      char **out_block, asize_t *out_reserved)
 {
@@ -165,7 +54,7 @@ int caml_mem_reserve(asize_t request, int kind,
   request = round_up(request, Pagetable_entry_size);
   /* hint at reserving near the previous block to
      have a good location in the page table. */
-  mem = caml_mem_reserve_os(request);
+  mem = caml_mem_reserve_os(request, Pagetable_entry_size);
   if (mem == NULL) return -1;
   *out_block = mem;
   *out_reserved = request;
@@ -174,12 +63,13 @@ int caml_mem_reserve(asize_t request, int kind,
 }
 
 /* [block] must be aligned to huge pages, and there must be enough
-   space to round request up to the nearest page or huge page. If
-   successful, [out_size] is set to the size that was actually
-   committed. */
+   reserved space to round the request up to the nearest page or huge
+   page. If successful, [out_size] is set to the size that was
+   actually committed. In case of error the whole range is
+   now invalid. */
 int caml_mem_commit(char *block, asize_t request, asize_t *out_size)
 {
-  request = caml_round_up_to_huge_page(request);
+  request = round_up_to_huge_page(request);
   /* Commit [block..block+size[ */
   if (-1 == caml_mem_commit_os(block, request)) goto err;
   *out_size = request;
@@ -194,7 +84,6 @@ void caml_mem_decommit(char * block, asize_t size)
 {
   caml_mem_decommit_os(block, size);
 }
-
 
 /* A best-fit allocator for reserved virtual address space */
 
@@ -369,6 +258,7 @@ CAMLunused_end
 
 /* Static data table */
 
+/* TODO: move to a separate file */
 static page_allocator static_area = PA_STATIC_INITIALIZER(Page_log);
 
 int caml_is_in_static_data(void *addr)
