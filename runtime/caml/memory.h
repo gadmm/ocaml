@@ -26,6 +26,7 @@
 #include "gc.h"
 #include "major_gc.h"
 #include "minor_gc.h"
+#include "platform.h"
 #endif /* CAML_INTERNALS */
 #include "misc.h"
 #include "mlvalues.h"
@@ -182,8 +183,6 @@ CAMLextern wchar_t* caml_stat_wcsconcat(int n, ...);
 /* void caml_shrink_heap (char *);        Only used in compact.c */
 
 #ifdef CAML_INTERNALS
-
-extern uintnat caml_use_huge_pages;
 
 #ifdef HAS_HUGE_PAGES
 #include <sys/mman.h>

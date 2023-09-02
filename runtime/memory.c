@@ -41,12 +41,6 @@ int caml_huge_fallback_count = 0;
    [Gc.huge_fallback_count].
 */
 
-uintnat caml_use_huge_pages = 0;
-/* True iff the program allocates heap chunks by mmapping huge pages.
-   This is set when parsing [OCAMLRUNPARAM] and must stay constant
-   after that.
-*/
-
 extern uintnat caml_percent_free;                   /* major_gc.c */
 
 /* Page table management */
