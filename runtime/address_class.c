@@ -17,7 +17,6 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <unistd.h>
 #include "caml/address_class.h"
 #include "caml/memory.h"
 #include "caml/pages.h"
