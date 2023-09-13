@@ -58,6 +58,11 @@ atomic_char *caml_heap_table = NULL;
 #define Pagetable_initial_size                                  \
   (((int)1 << (Pagetable_initial_bits - Pagetable_entry_log)))
 
+/* gcc 4.8 compat */
+#ifndef static_assert
+#define static_assert _Static_assert
+#endif
+
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
