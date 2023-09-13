@@ -40,7 +40,7 @@ uintnat caml_use_huge_pages = 1;
 static asize_t round_up_to_huge_page(asize_t size)
 {
   asize_t page_size = caml_use_huge_pages ? Huge_page_size : Real_page_size;
-  return round_up(size, page_size);
+  return Round_up(size, page_size);
 }
 
 // reserve at least [request] contiguous memory, rounded up to the
@@ -49,7 +49,7 @@ int caml_mem_reserve(asize_t request, int kind,
                      char **out_block, asize_t *out_reserved)
 {
   char *mem;
-  request = round_up(request, Pagetable_entry_size);
+  request = Round_up(request, Pagetable_entry_size);
   mem = caml_mem_reserve_os(request, Pagetable_entry_size);
   if (mem == NULL) return -1;
   *out_block = mem;

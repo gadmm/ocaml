@@ -98,8 +98,8 @@ int caml_page_table_initialize(mlsize_t bytesize)
 static int page_table_commit(intnat start, intnat end)
 {
   int ret = 0;
-  intnat page_start = round_down(start, Real_page_size);
-  intnat page_end = round_up(end, Real_page_size);
+  intnat page_start = Round_down(start, Real_page_size);
+  intnat page_end = Round_up(end, Real_page_size);
   uintnat size = page_end - page_start;
   if (page_start >= -(Pagetable_initial_size / 2)
       && page_end <= Pagetable_initial_size / 2) {
