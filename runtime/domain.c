@@ -19,8 +19,6 @@
 #include "caml/domain_state.h"
 #include "caml/memory.h"
 
-#include <malloc.h>
-
 CAMLexport caml_domain_state* Caml_state;
 
 void caml_init_domain ()
@@ -28,10 +26,8 @@ void caml_init_domain ()
   if (Caml_state != NULL)
     return;
 
-#define CACHE_LINE_SIZE 6
-
-  Caml_state = (caml_domain_state*)memalign(1 << CACHE_LINE_SIZE,
-                                            sizeof(caml_domain_state));
+  Caml_state =
+    (caml_domain_state*)caml_stat_alloc_noexc(sizeof(caml_domain_state));
   if (Caml_state == NULL)
     caml_fatal_error ("cannot initialize domain state");
 
