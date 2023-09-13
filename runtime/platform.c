@@ -151,7 +151,7 @@ again:
 static int madvise_os(char *block, asize_t size, int madvice)
 {
   int err;
-  // EAGAIN is Linux-specific
+  /* EAGAIN is Linux-specific */
   while (-1 == (err = madvise(block, size, madvice)) && errno == EAGAIN) {};
   return err;
 }
@@ -161,10 +161,10 @@ static int madvise_os(char *block, asize_t size, int madvice)
 static int mem_commit_os(char *block, asize_t size)
 {
 #ifndef _WIN32
-  // - Commit:
-  //    - MADV_FREE_REUSE on Darwin
-  //    - MADV_DODUMP, MADV_CORE. Darwin: none.
-  // Can we ensure it fails on OOM if overcommitting is off?
+  /* - Commit:
+        - MADV_FREE_REUSE on Darwin
+        - MADV_DODUMP, MADV_CORE. Darwin: none.
+     Can we ensure it fails on OOM if overcommitting is off? */
   if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
 #if defined(MADV_DODUMP)
   /* cancel MADV_DONTDUMP (Linux) */
@@ -209,21 +209,21 @@ static int mem_commit_os(char *block, asize_t size)
 static void mem_decommit_os(char * block, asize_t size)
 {
 #ifndef _WIN32
-  // - Decommit:
-  //    - MADV_DONTNEED on Linux with overcommitting
-  //      cf. https://github.com/golang/go/issues/42330
-  //    - MADV_FREE on BSD
-  //      and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
-  //      fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
-  //    - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
-  //      overcommitting (see jemalloc,glibc malloc)
-  //      (https://github.com/bminor/glibc/commit/9fab36eb58)
-  //    - MADV_FREE exists on Linux, so be careful about #ifdef.
-  //      MADV_FREE is more lazy in reclaiming memory, so we prefer
-  //      MADV_DONTNEED here since we decommit when we really want to free
-  //      memory.
-  //    - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
-  //      core files, but seems to help gdb) Darwin: NONE
+  /* - Decommit:
+        - MADV_DONTNEED on Linux with overcommitting
+          cf. https://github.com/golang/go/issues/42330
+        - MADV_FREE on BSD
+          and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
+          fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
+        - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
+          overcommitting (see jemalloc,glibc malloc)
+          (https://github.com/bminor/glibc/commit/9fab36eb58)
+        - MADV_FREE exists on Linux, so be careful about #ifdef.
+          MADV_FREE is more lazy in reclaiming memory, so we prefer
+          MADV_DONTNEED here since we decommit when we really want to free
+          memory.
+        - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
+          core files, but seems to help gdb) Darwin: NONE  */
   int advice;
 #if defined(__linux__)
   if (!caml_os_overcommit) {
@@ -304,12 +304,12 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   return mem;
 }
 
-// can be used to recommit (preserves already-committed mapping)
+/* can be used to recommit (preserves already-committed mapping) */
 int caml_mem_commit_os(char *block, asize_t size)
 {
   CAMLassert_aligned(block, Huge_page_size);
   CAMLassert_aligned(size, Real_page_size);
-  caml_gc_message(0x1000, "commit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+  caml_gc_message(0x1000, "committing %" ARCH_INTNAT_PRINTF_FORMAT "d"
                           " bytes at %p for heaps\n", size, block);
   return mem_commit_os(block, size);
 }
@@ -317,7 +317,7 @@ int caml_mem_commit_os(char *block, asize_t size)
 void caml_mem_decommit_os(char * block, asize_t size)
 {
   if (size == 0) return;
-  caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+  caml_gc_message(0x1000, "decommitting %" ARCH_INTNAT_PRINTF_FORMAT "d"
                           " bytes at %p for heaps\n", size, block);
   CAMLassert_aligned(block, Real_page_size);
   CAMLassert_aligned(size, Real_page_size);
