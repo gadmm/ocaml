@@ -105,19 +105,11 @@
 
 /* Page table: bibop */
 
+/* Granularity for VAS reservations */
 #ifdef ARCH_SIXTYFOUR
-
 #define Pagetable_entry_log 26 // 64MB
-/* Number of significant bits for pointers in the heap. Determines
-   reserved (not committed) area for page table; can support 57 bits
-   etc. */
-#define Pagetable_significant_bits 48
-
 #else
-
 #define Pagetable_entry_log 22 // 4MB
-#define Pagetable_significant_bits 32
-
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)

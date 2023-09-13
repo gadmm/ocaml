@@ -29,7 +29,6 @@
 atomic_char *caml_heap_table = NULL;
 
 #ifdef ARCH_SIXTYFOUR
-
 #ifndef NO_NAKED_POINTER
 /* Determines area committed up-front for the page table. Should
    remains at most 48 bits even on 57-bit address spaces as this is
@@ -49,14 +48,11 @@ atomic_char *caml_heap_table = NULL;
    pointers. */
 #define Pagetable_initial_bits 0
 #endif
-
 #else
-
 #define Pagetable_initial_bits 32
-
 #endif /* ARCH_SIXTYFOUR */
 
-#define Pagetable_log (Pagetable_significant_bits - Pagetable_entry_log)
+#define Pagetable_log (Page_allocator_significant_ptr_bits-Pagetable_entry_log)
 #define Pagetable_size (((int)1 << Pagetable_log))
 #define Pagetable_initial_size                                  \
   (((int)1 << (Pagetable_initial_bits - Pagetable_entry_log)))

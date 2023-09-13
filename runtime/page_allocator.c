@@ -22,7 +22,8 @@
 #include "caml/skiplist.h"
 
 #define PA_page_size(pa) ((uintnat)1 << (pa)->page_log)
-#define PA_small_address_log(pa) (Pagetable_significant_bits - (pa)->page_log)
+#define PA_small_address_log(pa)                          \
+  (Page_allocator_significant_ptr_bits - (pa)->page_log)
 #define PA_small_address_mask(pa) (((uintnat)1 << PA_small_address_log(pa)) - 1)
 #define PA_num_max_log(pa) (8 * sizeof(uintnat) - PA_small_address_log(pa))
 #define PA_size_max(pa) \
