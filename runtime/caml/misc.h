@@ -254,15 +254,8 @@ CAMLnoreturn_end;
   (CAMLassert_is_power_of_2(m),CAMLassert_aligned_(n,m))
 #define CAMLassert_is_power_of_2(n) CAMLassert_aligned_(n, n)
 
-Caml_inline intnat round_down(intnat n, intnat mod)
-{
-  return (n >= 0 ? n : n - mod + 1) / mod * mod;
-}
-
-Caml_inline intnat round_up(intnat n, intnat mod)
-{
-  return round_down(n + mod - 1, mod);
-}
+#define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
+#define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
 
 #endif /* CAML_INTERNALS */
 

@@ -111,7 +111,7 @@ again:
        downwards */
     mem = last_mem - size;
   } else {
-    mem = (char *) round_up((uintnat)block, align);
+    mem = (char *) Round_up((uintnat)block, align);
   }
   CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
 #ifndef _WIN32

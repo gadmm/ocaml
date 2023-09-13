@@ -127,7 +127,7 @@ int caml_pa_alloc(page_allocator *pa, asize_t request,
 {
   char *block;
   asize_t available;
-  request = round_up(request, PA_page_size(pa));
+  request = Round_up(request, PA_page_size(pa));
   if (pa_find_above_size(pa, request, &block, &available)) {
     char *new_block;
     pa_remove_free(pa, block, available);
