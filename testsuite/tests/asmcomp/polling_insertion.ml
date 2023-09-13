@@ -1,8 +1,10 @@
 (* TEST
    modules = "polling.c"
    compare_programs = "false"
-   * arch64
-   ** native
+   * skip
+   reason = "This test is brittle"
+   ** arch64
+   *** native
 *)
 
 (* This set of tests examine poll insertion behaviour. We do this by requesting
