@@ -295,8 +295,7 @@ static void mem_unmap_os(char *block, asize_t size)
   failed = !VirtualFree(mem, 0, MEM_RELEASE);
 #endif
   if (failed) {
-    caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
-                            " bytes at %p failed\n", size, block);
+    caml_gc_message(0x1000, "decommit %zu bytes at %p failed\n", size, block);
   };
 }
 
@@ -309,8 +308,8 @@ void caml_mem_unreserve_all(void)
   FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
       char *block = (char *)elem->key;
       asize_t size = (asize_t)elem->data;
-      caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
-                              " bytes at %p for heaps\n", size, block);
+      caml_gc_message(0x1000, "decommit %zu bytes at %p for heaps\n",
+                      size, block);
       mem_unmap_os(block, size);
     });
 }
@@ -324,14 +323,12 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   CAMLassert_aligned(size, align);
   mem = mem_reserve_os(size, align);
   if (mem == NULL) {
-    caml_gc_message(0x1000, "reserving %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
-                            "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
-                            "failed\n", size, align);
+    caml_gc_message(0x1000, "reserving %zu bytes with alignment %zu failed\n",
+                    size, align);
     return NULL;
   }
   CAMLassert_aligned(mem, align);
-  caml_gc_message(0x1000, "reserved %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
-                          "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
+  caml_gc_message(0x1000, "reserved %zu bytes with alignment %zu "
                           "at %p for heaps\n", size, align, mem);
   /* remember the mmaped area for cleanup at exit */
   caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
@@ -341,15 +338,15 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
 /* can be used to recommit (preserves already-committed mapping) */
 int caml_mem_commit_os(char *block, asize_t size)
 {
-  caml_gc_message(0x1000, "committing %" ARCH_INTNAT_PRINTF_FORMAT "d"
-                          " bytes at %p for heaps\n", size, block);
+  caml_gc_message(0x1000, "committing %zu bytes at %p for heaps\n",
+                  size, block);
   return mem_commit_os(block, size);
 }
 
 void caml_mem_decommit_os(char * block, asize_t size)
 {
   if (size == 0) return;
-  caml_gc_message(0x1000, "decommitting %" ARCH_INTNAT_PRINTF_FORMAT "d"
-                          " bytes at %p for heaps\n", size, block);
+  caml_gc_message(0x1000, "decommitting %zu bytes at %p for heaps\n",
+                  size, block);
   mem_decommit_os(block, size);
 }

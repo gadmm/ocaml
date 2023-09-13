@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include "caml/address_class.h"
+#include "caml/memory.h"
 #include "caml/pages.h"
 #include "caml/page_allocator.h"
 #include "caml/platform.h"
@@ -65,14 +66,20 @@ static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 int caml_page_table_initialize(mlsize_t bytesize)
 {
   int ret = 0;
+#ifdef ARCH_SIXTYFOUR
   void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
+#else
+  void *block = caml_stat_alloc_noexc(Pagetable_size);
+#endif
   if (block == NULL) return -1;
   /* Kernel addresses are represented with negative offsets */
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
+#ifdef ARCH_SIXTYFOUR
   /* Commit initial portion */
   ret = caml_mem_commit_os((char *)caml_heap_table - (Pagetable_initial_size/2),
                            Pagetable_initial_size);
   CAMLassert(ret != -1 || errno == ENOMEM);
+#endif
   return ret;
 }
 
@@ -83,6 +90,7 @@ int caml_page_table_initialize(mlsize_t bytesize)
 static int page_table_commit(intnat start, intnat end)
 {
   int ret = 0;
+#ifdef ARCH_SIXTYFOUR
   intnat page_start = Round_down(start, Real_page_size);
   intnat page_end = Round_up(end, Real_page_size);
   uintnat size = page_end - page_start;
@@ -96,6 +104,7 @@ static int page_table_commit(intnat start, intnat end)
   CAMLassert(page_end <= Pagetable_size / 2);
   ret = caml_mem_commit_os((char *)&caml_heap_table[page_start], size);
   CAMLassert(ret != -1 || errno == ENOMEM);
+#endif
   return ret;
 }
 
