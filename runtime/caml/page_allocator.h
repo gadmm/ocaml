@@ -32,6 +32,14 @@
 extern "C" {
 #endif
 
+#ifdef ARCH_SIXTYFOUR
+/* Number of significant bits of pointers on this platform; can
+   support 57 bits etc. Affects PA_num_max_log. */
+#define Page_allocator_significant_ptr_bits 48
+#else
+#define Page_allocator_significant_ptr_bits 32
+#endif /* ARCH_SIXTYFOUR */
+
 /* A best-fit allocator for memory ranges aligned to a big power of 2. */
 
 typedef struct {
@@ -43,9 +51,9 @@ typedef struct {
 
      key: lexicographic ordering by size (decreasing) and address.
 
-       ~( # huge pages )      msbs of address
-     |-------------------|------------------------|
-        num_max_log bits   small_address_log bits
+          ~( # pages )            msbs of address
+     |---------------------|---------------------------|
+       PA_num_max_log bits   PA_small_address_log bits
   */
   struct skiplist free_per_size_sk;
 } page_allocator;
