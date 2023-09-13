@@ -80,62 +80,73 @@ void caml_mem_os_init(void)
 #endif
 }
 
-/* Reservation, platform-specific */
+/* Reserving & committing memory, platform-specific */
 
-static void mem_unmap_os(char *block, asize_t size)
+static void mem_unmap_os(char *block, asize_t size);
+
+static char * mem_reserve_os(asize_t size, asize_t align)
 {
-  if (size != 0) {
-    int ret = munmap(block, size);
-    CAMLassert(ret != -1 || errno != EINVAL);
-    (void)ret;
-  }
-}
-
-static struct skiplist mmaped_areas = SKIPLIST_STATIC_INITIALIZER;
-
-void caml_mem_unreserve_all(void)
-{
-  FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
-      mem_unmap_os((char *)elem->key, (asize_t)elem->data);
-    });
-}
-
-/* Reserve [size] bytes, aligned at [align]. [size] must be a multiple
-   of [align] and align a power of 2. */
-char * caml_mem_reserve_os(asize_t size, asize_t align)
-{
-  // All platforms except win32. TODO: see golang for win32.
-  static char *last_mem = NULL;
-  static asize_t last_size = 0;
   char *mem;
   char *block;
   asize_t request_virtual = size + align;
-  CAMLassert_is_power_of_2(align);
-  CAMLassert_aligned(size, align);
-  // Hint at the end of the previously-reserved block
+  bool failed;
+#ifndef _WIN32
+  static char *last_mem = NULL;
+  static asize_t last_size = 0;
+  /* Hint at the end of the previously-reserved block */
   block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (block == MAP_FAILED) return NULL;
-  // Prefer contiguous if possible, to avoid holes in the VAS
+  failed = (block == MAP_FAILED);
+#else // _WIN32
+  int tries = 1000;
+again:
+  mem = VirtualAlloc(NULL, request_virtual, MEM_RESERVE, PAGE_NOACCESS);
+  failed = (mem == NULL);
+#endif
+  if (failed) return NULL;
+  /* Trim to an aligned region */
+  /* Prefer contiguous if possible, to avoid holes in the VAS */
   if (block + request_virtual == last_mem) {
-    // This is likely to happen on Linux, where the mmaped area grows
-    // downwards
+    /* This case is likely to happen on Linux, where the mmaped area grows
+       downwards */
     mem = last_mem - size;
   } else {
     mem = (char *) round_up((uintnat)block, align);
   }
   CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
+#ifndef _WIN32
   /* free beginning */
   mem_unmap_os(block, mem - block);
   /* free end */
   mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
   /* [mem..mem+size[ is reserved */
-  /* remember the mmaped area for cleanup at exit */
-  caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
   last_mem = mem;
   last_size = size;
+#else // _WIN32
+  /* VirtualFree can be used to decommit portions of memory, but it
+     can only release the entire block of memory. For Windows, repeat
+     the call but this time specify the address. This is racy, so it
+     might fail, in which case we retry. */
+  VirtualFree(mem, 0, MEM_RELEASE);
+  mem = VirtualAlloc((void*)mem, size, MEM_RESERVE, PAGE_NOACCESS);
+  if (mem == NULL) {
+    /* VirtualAlloc can return the following three interesting errors:
+         - ERROR_INVALID_ADDRESS - pages are already reserved (race)
+         - ERROR_NOT_ENOUGH_MEMORY - address space exhausted
+         - ERROR_COMMITMENT_LIMIT - memory exhausted */
+    if (GetLastError() == ERROR_INVALID_ADDRESS && tries-- > 0) {
+      SetLastError(0);
+      /* Raced - try again. */
+      goto again;
+    } else {
+      return NULL;
+    }
+  }
+#endif
   return mem;
 }
+
+#ifndef _WIN32
 
 static int madvise_os(char *block, asize_t size, int madvice)
 {
@@ -145,15 +156,15 @@ static int madvise_os(char *block, asize_t size, int madvice)
   return err;
 }
 
-// can be used to recommit (preserves already-committed mapping)
-int caml_mem_commit_os(char *block, asize_t size)
+#endif
+
+static int mem_commit_os(char *block, asize_t size)
 {
+#ifndef _WIN32
   // - Commit:
   //    - MADV_FREE_REUSE on Darwin
   //    - MADV_DODUMP, MADV_CORE. Darwin: none.
   // Can we ensure it fails on OOM if overcommitting is off?
-  CAMLassert_aligned(block, Huge_page_size);
-  CAMLassert_aligned(size, Real_page_size);
   if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
 #if defined(MADV_DODUMP)
   /* cancel MADV_DONTDUMP (Linux) */
@@ -181,10 +192,23 @@ int caml_mem_commit_os(char *block, asize_t size)
   }
 #endif
   return 0;
+#else // _WIN32
+  void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
+  bool ret == (!!m - 1);
+  if (ret == -1) {
+    if (GetLastError() == ERROR_NOT_ENOUGH_MEMORY
+        || GetLastError() == ERROR_COMMITMENT_LIMIT)
+      errno = ENOMEM;
+    else
+      errno = EINVAL;
+  }
+  return (!!ret) - 1;
+#endif
 }
 
-void caml_mem_decommit_os(char * block, asize_t size)
+static void mem_decommit_os(char * block, asize_t size)
 {
+#ifndef _WIN32
   // - Decommit:
   //    - MADV_DONTNEED on Linux with overcommitting
   //      cf. https://github.com/golang/go/issues/42330
@@ -201,9 +225,6 @@ void caml_mem_decommit_os(char * block, asize_t size)
   //    - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
   //      core files, but seems to help gdb) Darwin: NONE
   int advice;
-  if (size == 0) return;
-  CAMLassert_aligned(block, Real_page_size);
-  CAMLassert_aligned(size, Real_page_size);
 #if defined(__linux__)
   if (!caml_os_overcommit) {
     mmap(block, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
@@ -225,4 +246,80 @@ void caml_mem_decommit_os(char * block, asize_t size)
 #elif defined(MADV_NOCORE) // FreeBSD
   madvise_os(block, size, MADV_NOCORE);
 #endif
+#else // _WIN32
+  VirtualFree((void *)block, size, MEM_DECOMMIT);
+#endif
+}
+
+static void mem_unmap_os(char *block, asize_t size)
+{
+  bool failed;
+  if (size == 0) return;
+#ifndef _WIN32
+  failed = (munmap(block, size) == -1);
+  CAMLassert(!failed || errno != EINVAL);
+#else // _WIN32
+  failed = !VirtualFree(mem, 0, MEM_RELEASE);
+#endif
+  if (failed) {
+    caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+                            " bytes at %p failed\n", size, block);
+  };
+}
+
+/* Wrapped functions */
+
+static struct skiplist mmaped_areas = SKIPLIST_STATIC_INITIALIZER;
+
+void caml_mem_unreserve_all(void)
+{
+  FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
+      char *block = (char *)elem->key;
+      asize_t size = (asize_t)elem->data;
+      caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+                              " bytes at %p for heaps\n", size, block);
+      mem_unmap_os(block, size);
+    });
+}
+
+/* Reserve [size] bytes, aligned at [align]. [size] must be a multiple
+   of [align] and align a power of 2. */
+char * caml_mem_reserve_os(asize_t size, asize_t align)
+{
+  char *mem;
+  CAMLassert_is_power_of_2(align);
+  CAMLassert_aligned(size, align);
+  mem = mem_reserve_os(size, align);
+  if (mem == NULL) {
+    caml_gc_message(0x1000, "reserving %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
+                            "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
+                            "failed", size, align);
+    return NULL;
+  }
+  caml_gc_message(0x1000, "reserved %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
+                          "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
+                          "at %p for heaps", size, align, mem);
+  /* remember the mmaped area for cleanup at exit */
+  caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
+  return mem;
+}
+
+// can be used to recommit (preserves already-committed mapping)
+int caml_mem_commit_os(char *block, asize_t size)
+{
+  CAMLassert_aligned(block, Huge_page_size);
+  CAMLassert_aligned(size, Real_page_size);
+  caml_gc_message(0x1000, "commit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+                          " bytes at %p for heaps\n", size, block);
+  return mem_commit_os(block, size);
+}
+
+void caml_mem_decommit_os(char * block, asize_t size)
+{
+  if (size == 0) return;
+  caml_gc_message(0x1000, "decommit %" ARCH_INTNAT_PRINTF_FORMAT "d"
+                          " bytes at %p for heaps\n", size, block);
+  CAMLassert_aligned(block, Real_page_size);
+  CAMLassert_aligned(size, Real_page_size);
+  mem_decommit_os(block, size);
 }
