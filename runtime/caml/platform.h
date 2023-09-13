@@ -37,17 +37,20 @@ CAMLextern uintnat caml_real_page_size;
   (CAMLassert(caml_real_page_size != 0), caml_real_page_size)
 
 /* There does not seem to be a way to ask the OS for the size of a
-   huge page. Legends tell that some systems have them larger than
-   2MB. Let's try:
+   huge page. Some systems have them different from 2MB.
+   According to sources:
      x86-64, arm -> 2MB
-     i386 -> 4MB
      ppc64 -> 64MB
 */
 #define Huge_page_log 21 // 2MB
 #define Huge_page_size ((uintnat)1 << Huge_page_log)
 
-/* On Linux, mmap grows downwards */
+/* On Linux, mmap grows downwards. This is used heuristically only. */
+#ifdef __linux__
 #define MMAP_GROWS_DOWN 1
+#else
+#define MMAP_GROWS_DOWN 0
+#endif
 
 char *caml_mem_reserve_os(asize_t size, asize_t align);
 int caml_mem_commit_os(char *block, asize_t size);
