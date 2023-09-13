@@ -17,7 +17,6 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <stdatomic.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include "caml/address_class.h"
