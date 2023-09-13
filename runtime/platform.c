@@ -130,6 +130,7 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   /* free end */
   mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
   /* [mem..mem+size[ is reserved */
+  /* remember the mmaped area for cleanup at exit */
   caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
   last_mem = mem;
   last_size = size;
@@ -148,15 +149,26 @@ static int madvise_os(char *block, asize_t size, int madvice)
 int caml_mem_commit_os(char *block, asize_t size)
 {
   // - Commit:
-  //    - Ensure it fails on OOM if overcommitting is off.
   //    - MADV_FREE_REUSE on Darwin
   //    - MADV_DODUMP, MADV_CORE. Darwin: none.
+  // Can we ensure it fails on OOM if overcommitting is off?
   CAMLassert_aligned(block, Huge_page_size);
   CAMLassert_aligned(size, Real_page_size);
   if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
-  /* MADV_DODUMP: cancel MADV_DONTDUMP */
-  if (-1 == madvise_os(block, size, MADV_DODUMP)) return -1;
-#ifdef MADV_HUGEPAGE
+#if defined(MADV_DODUMP)
+  /* cancel MADV_DONTDUMP (Linux) */
+  madvise_os(block, size, MADV_DODUMP); // ignore error
+#elif defined(MADV_CORE)
+  /* cancel MADV_NOCORE (FreeBSD) */
+  madvise_os(block, size, MADV_CORE); // ignore error
+#endif
+#ifdef MADV_FREE_REUSE
+  /* cancel MADV_FREE_REUSABLE (Darwin). Calling
+     madvise(MADV_FREE_REUSE) has no effect on areas where
+     madvise(MADV_FREE_REUSABLE) was not called. */
+  madvise_os(block, size, MADV_FREE_REUSE); // ignore error
+#endif
+#ifdef MADV_HUGEPAGE // Linux
   if (caml_use_huge_pages) {
     CAMLassert_aligned(size, Huge_page_size);
     /* Request huge pages (THP) if huge pages are enabled. Note: this
@@ -164,10 +176,8 @@ int caml_mem_commit_os(char *block, asize_t size)
        is set to [always], [madvise] or [defer+madvise], since OCaml
        will try to touch a lot of huge pages at once. [defer] is
        preferred. */
-    if (-1 == madvise_os(block, size, MADV_HUGEPAGE)) return -1;
-    /* TODO:
-       - 1GB hugepage support.
-       - restore hugetlb behaviour for backwards-compat. */
+    madvise_os(block, size, MADV_HUGEPAGE); // ignore error
+    /* TODO: restore hugetlb behaviour for backwards-compat. */
   }
 #endif
   return 0;
@@ -176,19 +186,43 @@ int caml_mem_commit_os(char *block, asize_t size)
 void caml_mem_decommit_os(char * block, asize_t size)
 {
   // - Decommit:
-  //    - MADV_DONTNEED on Linux with overcommitting, MADV_FREE on BSD
+  //    - MADV_DONTNEED on Linux with overcommitting
+  //      cf. https://github.com/golang/go/issues/42330
+  //    - MADV_FREE on BSD
   //      and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
   //      fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
   //    - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
   //      overcommitting (see jemalloc,glibc malloc)
   //      (https://github.com/bminor/glibc/commit/9fab36eb58)
   //    - MADV_FREE exists on Linux, so be careful about #ifdef.
+  //      MADV_FREE is more lazy in reclaiming memory, so we prefer
+  //      MADV_DONTNEED here since we decommit when we really want to free
+  //      memory.
   //    - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
   //      core files, but seems to help gdb) Darwin: NONE
+  int advice;
   if (size == 0) return;
   CAMLassert_aligned(block, Real_page_size);
   CAMLassert_aligned(size, Real_page_size);
-  mprotect(block, size, PROT_NONE);
-  madvise_os(block, size, MADV_DONTNEED);
+#if defined(__linux__)
+  if (!caml_os_overcommit) {
+    mmap(block, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
+         -1, 0);
+    return;
+  }
+#endif
+#if defined(MADV_FREE_REUSABLE) // Darwin
+  advice = MADV_FREE_REUSABLE;
+#elif (defined(MADV_FREE) && !defined(__linux__))
+  advice = MADV_FREE;
+#else
+  advice = MADV_DONTNEED;
+#endif
+  /* ignore errors */
+  madvise_os(block, size, advice);
+#if defined(MADV_DONTDUMP) // Linux
   madvise_os(block, size, MADV_DONTDUMP);
+#elif defined(MADV_NOCORE) // FreeBSD
+  madvise_os(block, size, MADV_NOCORE);
+#endif
 }

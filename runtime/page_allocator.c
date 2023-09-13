@@ -132,7 +132,7 @@ int caml_pa_alloc(page_allocator *pa, asize_t request,
     pa_remove_free(pa, block, available);
     if (MMAP_GROWS_DOWN) {
       /* Commit the end to avoid holes, later, in the committed VAS,
-         on platforms where mmap grows down */
+         on platforms where mmap grows down. This is a heuristic. */
       new_block = block + available - request;
     } else {
       new_block = block;
