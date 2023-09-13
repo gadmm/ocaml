@@ -65,6 +65,7 @@ int caml_mem_reserve(asize_t request, int kind,
    now invalid. */
 int caml_mem_commit(char *block, asize_t request, asize_t *out_size)
 {
+  CAMLassert_aligned(block, Huge_page_size);
   request = round_up_to_huge_page(request);
   /* Commit [block..block+size[ */
   if (-1 == caml_mem_commit_os(block, request)) goto err;
@@ -78,6 +79,8 @@ err:
 /* [block] and [size] must be aligned to Real_page_size. */
 void caml_mem_decommit(char * block, asize_t size)
 {
+  CAMLassert_aligned(block, Real_page_size);
+  CAMLassert_aligned(size, Real_page_size);
   caml_mem_decommit_os(block, size);
 }
 

@@ -159,7 +159,6 @@ int caml_page_table_add_static_data(void * start, void * end);
 
 #ifdef CAML_INTERNALS
 int caml_page_table_initialize(mlsize_t bytesize);
-void caml_page_table_release(void);
 #endif
 
 #endif /* CAML_ADDRESS_CLASS_H */

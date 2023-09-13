@@ -32,6 +32,10 @@
 #include <sys/sysctl.h>
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 uintnat caml_real_page_size = Page_size;
 static bool caml_os_overcommit = false;
 
@@ -88,37 +92,50 @@ static char * mem_reserve_os(asize_t size, asize_t align)
 {
   char *mem;
   char *block;
-  asize_t request_virtual = size + align;
+  asize_t request_virtual;
   bool failed;
 #ifndef _WIN32
   static char *last_mem = NULL;
   static asize_t last_size = 0;
+#else // _WIN32
+  int tries = 1000;
+#endif
+  /* The minimum alignment is to the page size, in which case it is
+     obtained for free */
+  if (align <= Real_page_size) align = 0;
+  request_virtual = size + align;
+#ifndef _WIN32
   /* Hint at the end of the previously-reserved block */
   block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   failed = (block == MAP_FAILED);
 #else // _WIN32
-  int tries = 1000;
 again:
-  mem = VirtualAlloc(NULL, request_virtual, MEM_RESERVE, PAGE_NOACCESS);
-  failed = (mem == NULL);
+  block = VirtualAlloc(NULL, request_virtual, MEM_RESERVE, PAGE_NOACCESS);
+  failed = (block == NULL);
 #endif
   if (failed) return NULL;
+  if (align == 0) {
+    mem = block;
+    goto done;
+  }
   /* Trim to an aligned region */
   /* Prefer contiguous if possible, to avoid holes in the VAS */
-  if (block + request_virtual == last_mem) {
+  if (block + request_virtual == last_mem || MMAP_GROWS_DOWN) {
     /* This case is likely to happen on Linux, where the mmaped area grows
        downwards */
-    mem = last_mem - size;
+    mem = (char *) Round_down((uintnat)block + request_virtual - size, align);
   } else {
     mem = (char *) Round_up((uintnat)block, align);
   }
+  CAMLassert((uintnat) mem >= (uintnat) block);
   CAMLassert((uintnat) mem + size <= (uintnat) block + request_virtual);
 #ifndef _WIN32
   /* free beginning */
   mem_unmap_os(block, mem - block);
   /* free end */
   mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
+ done:
   /* [mem..mem+size[ is reserved */
   last_mem = mem;
   last_size = size;
@@ -127,9 +144,9 @@ again:
      can only release the entire block of memory. For Windows, repeat
      the call but this time specify the address. This is racy, so it
      might fail, in which case we retry. */
-  VirtualFree(mem, 0, MEM_RELEASE);
-  mem = VirtualAlloc((void*)mem, size, MEM_RESERVE, PAGE_NOACCESS);
-  if (mem == NULL) {
+  VirtualFree(block, 0, MEM_RELEASE);
+  block = VirtualAlloc((void*)mem, size, MEM_RESERVE, PAGE_NOACCESS);
+  if (block == NULL) {
     /* VirtualAlloc can return the following three interesting errors:
          - ERROR_INVALID_ADDRESS - pages are already reserved (race)
          - ERROR_NOT_ENOUGH_MEMORY - address space exhausted
@@ -142,6 +159,7 @@ again:
       return NULL;
     }
   }
+ done:
 #endif
   return mem;
 }
@@ -156,6 +174,17 @@ static int madvise_os(char *block, asize_t size, int madvice)
   return err;
 }
 
+/* Adjust alignment to page for mprotect/madvise */
+static void adjust_to_page(char **block, asize_t *size)
+{
+  uintnat start = (uintnat)*block;
+  uintnat start_aligned = Round_down(start, Real_page_size);
+  uintnat size_aligned =
+    Round_up(*size + (start - start_aligned), Real_page_size);
+  *size = size_aligned;
+  *block = (char *)start_aligned;
+}
+
 #endif
 
 static int mem_commit_os(char *block, asize_t size)
@@ -165,6 +194,7 @@ static int mem_commit_os(char *block, asize_t size)
         - MADV_FREE_REUSE on Darwin
         - MADV_DODUMP, MADV_CORE. Darwin: none.
      Can we ensure it fails on OOM if overcommitting is off? */
+  adjust_to_page(&block, &size);
   if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
 #if defined(MADV_DODUMP)
   /* cancel MADV_DONTDUMP (Linux) */
@@ -180,13 +210,14 @@ static int mem_commit_os(char *block, asize_t size)
   madvise_os(block, size, MADV_FREE_REUSE); // ignore error
 #endif
 #ifdef MADV_HUGEPAGE // Linux
-  if (caml_use_huge_pages) {
-    CAMLassert_aligned(size, Huge_page_size);
-    /* Request huge pages (THP) if huge pages are enabled. Note: this
-       can cause large pauses if /sys/kernel/mm/transparent_hugepage/defrag
-       is set to [always], [madvise] or [defer+madvise], since OCaml
-       will try to touch a lot of huge pages at once. [defer] is
-       preferred. */
+  if (caml_use_huge_pages
+      && (uintnat)block == Round_down((uintnat)block, Huge_page_size)
+      && (uintnat)size == Round_down((uintnat)size, Huge_page_size)) {
+    /* Request huge pages (THP) if huge pages are enabled and the
+       region is Huge-page-aligned. Note: this can cause large pauses
+       if /sys/kernel/mm/transparent_hugepage/defrag is set to
+       [always], [madvise] or [defer+madvise], since OCaml will try to
+       touch a lot of huge pages at once. [defer] is preferred. */
     madvise_os(block, size, MADV_HUGEPAGE); // ignore error
     /* TODO: restore hugetlb behaviour for backwards-compat. */
   }
@@ -225,6 +256,7 @@ static void mem_decommit_os(char * block, asize_t size)
         - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
           core files, but seems to help gdb) Darwin: NONE  */
   int advice;
+  adjust_to_page(&block, &size);
 #if defined(__linux__)
   if (!caml_os_overcommit) {
     mmap(block, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
@@ -309,8 +341,6 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
 /* can be used to recommit (preserves already-committed mapping) */
 int caml_mem_commit_os(char *block, asize_t size)
 {
-  CAMLassert_aligned(block, Huge_page_size);
-  CAMLassert_aligned(size, Real_page_size);
   caml_gc_message(0x1000, "committing %" ARCH_INTNAT_PRINTF_FORMAT "d"
                           " bytes at %p for heaps\n", size, block);
   return mem_commit_os(block, size);
@@ -321,7 +351,5 @@ void caml_mem_decommit_os(char * block, asize_t size)
   if (size == 0) return;
   caml_gc_message(0x1000, "decommitting %" ARCH_INTNAT_PRINTF_FORMAT "d"
                           " bytes at %p for heaps\n", size, block);
-  CAMLassert_aligned(block, Real_page_size);
-  CAMLassert_aligned(size, Real_page_size);
   mem_decommit_os(block, size);
 }

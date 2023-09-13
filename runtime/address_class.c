@@ -62,33 +62,18 @@ atomic_char *caml_heap_table = NULL;
 static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
 static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
-void caml_page_table_release(void)
-{
-  int ret = 0;
-  CAMLassert(caml_heap_table != NULL);
-  ret = munmap(caml_heap_table - (Pagetable_size / 2), Pagetable_size);
-  CAMLassert(ret != -1 || errno != EINVAL);
-  (void)ret;
-}
-
 int caml_page_table_initialize(mlsize_t bytesize)
 {
   int ret = 0;
-  // TODO: win32
-  void *block = mmap(NULL, Pagetable_size, PROT_NONE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (block == MAP_FAILED) return -1;
+  void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
+  if (block == NULL) return -1;
   /* Kernel addresses are represented with negative offsets */
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
   /* Commit initial portion */
-  ret = mprotect(caml_heap_table - (Pagetable_initial_size / 2),
-                 Pagetable_initial_size, PROT_READ | PROT_WRITE);
+  ret = caml_mem_commit_os((char *)caml_heap_table - (Pagetable_initial_size/2),
+                           Pagetable_initial_size);
   CAMLassert(ret != -1 || errno == ENOMEM);
-  if (ret == -1) goto err;
-  return 0;
- err:
-  caml_page_table_release();
-  return -1;
+  return ret;
 }
 
 /* This is called infrequently, and for a small portion of
@@ -109,7 +94,7 @@ static int page_table_commit(intnat start, intnat end)
   }
   CAMLassert(page_start >= -(Pagetable_size / 2));
   CAMLassert(page_end <= Pagetable_size / 2);
-  ret = mprotect(&caml_heap_table[page_start], size, PROT_READ | PROT_WRITE);
+  ret = caml_mem_commit_os((char *)&caml_heap_table[page_start], size);
   CAMLassert(ret != -1 || errno == ENOMEM);
   return ret;
 }
