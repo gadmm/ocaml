@@ -65,7 +65,11 @@
 #define CAML_ADDRESS_CLASS_H
 
 #include <assert.h>
+
+#if (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
+#define HAS_ATOMICS
 #include <stdatomic.h>
+#endif
 
 #include "config.h"
 #include "misc.h"
@@ -115,14 +119,22 @@
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
 #define Pagetable_entry(p) ((intnat)(p) >> Pagetable_entry_log)
 
+#ifndef HAS_ATOMICS
+typedef char atomic_char;
+#endif
 CAMLextern atomic_char *caml_heap_table;
 
 Caml_inline char caml_heap_table_get_sync(intnat p)
 {
   char e = 0;
+#ifdef HAS_ATOMICS
   if (atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
                                               Unmanaged, memory_order_acq_rel,
                                               memory_order_acquire)) {
+#else
+  if (e = caml_heap_table[p], e == 0) {
+    caml_heap_table[p] = Unmanaged;
+#endif
     return Unmanaged;
   } else {
     // e != 0
@@ -133,7 +145,11 @@ Caml_inline char caml_heap_table_get_sync(intnat p)
 Caml_inline int caml_classify_address(void *a)
 {
   intnat p = Pagetable_entry(a);
+#ifdef HAS_ATOMICS
   char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
+#else
+  char e = caml_heap_table[p];
+#endif
   if (CAMLlikely(e != 0)) return e;
   return caml_heap_table_get_sync(p);
 }
@@ -148,7 +164,11 @@ Caml_inline int caml_classify_address(void *a)
 Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
 {
   intnat p = Pagetable_entry(v);
+#ifdef HAS_ATOMICS
   char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
+#else
+  char e = heap_table[p];
+#endif
   return CAMLlikely(e & In_heap);
 }
 

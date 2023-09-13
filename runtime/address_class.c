@@ -121,9 +121,15 @@ int caml_page_table_add(int kind, void * start, void * end)
   if (-1 == page_table_commit(pstart, pend)) return -1;
   for (p = pstart; p < pend; p++) {
     char e = 0;
+#ifdef HAS_ATOMICS
     if (!atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
                                                  kind, memory_order_acq_rel,
-                                                 memory_order_acquire))
+                                                 memory_order_acquire)) {
+#else
+    if (e = caml_heap_table[p], e == 0) {
+      caml_heap_table[p] = kind;
+    } else {
+#endif
       // It is currently a programming error to:
       // - Let foreign pointers be seen by the OCaml GC
       // - Release the underlying mapping of these pointers, so that
@@ -142,6 +148,7 @@ int caml_page_table_add(int kind, void * start, void * end)
       // mapping, except in situations where the outside world
       // declared their pages of interest in advances).
       if (e != kind) ret = -1;
+    }
   }
   return ret;
 }
