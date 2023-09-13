@@ -251,6 +251,7 @@ static void mem_decommit_os(char * block, asize_t size)
 #endif
 }
 
+/* Only accepts full reserved areas */
 static void mem_unmap_os(char *block, asize_t size)
 {
   bool failed;
@@ -293,12 +294,13 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   if (mem == NULL) {
     caml_gc_message(0x1000, "reserving %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
                             "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
-                            "failed", size, align);
+                            "failed\n", size, align);
     return NULL;
   }
+  CAMLassert_aligned(mem, align);
   caml_gc_message(0x1000, "reserved %" ARCH_INTNAT_PRINTF_FORMAT "d bytes "
                           "with alignment %" ARCH_INTNAT_PRINTF_FORMAT "d "
-                          "at %p for heaps", size, align, mem);
+                          "at %p for heaps\n", size, align, mem);
   /* remember the mmaped area for cleanup at exit */
   caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
   return mem;

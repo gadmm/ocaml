@@ -30,14 +30,15 @@ atomic_char *caml_heap_table = NULL;
 
 #ifdef ARCH_SIXTYFOUR
 #ifndef NO_NAKED_POINTER
-/* Determines area committed up-front for the page table. Should
+/* Determines area committed up-front for the page table. It should
    remains at most 48 bits even on 57-bit address spaces as this is
-   all that is needed for backwards-compatibility (similarly we could
-   omit the kernel space, but we do not).
+   all that is needed for backwards-compatibility (in the same way we
+   could exclude the kernel space, though we do not).
 
    (This represents approx 4 MB mapped initially to the zero page.
-   This does not consume physical memory, and on overcommitting
-   systems does not count towards a memory limit.)
+   This does not consume physical memory apart from a couple of pages
+   later, and on overcommitting systems the zero-mapped pages do not
+   count towards a memory limit.)
 
    Can be set to zero if we require that page_table_commit or
    caml_page_table_add is required to announce out-of-heap areas
@@ -52,7 +53,8 @@ atomic_char *caml_heap_table = NULL;
 #define Pagetable_initial_bits 32
 #endif /* ARCH_SIXTYFOUR */
 
-#define Pagetable_log (Page_allocator_significant_ptr_bits-Pagetable_entry_log)
+#define Pagetable_log                                       \
+  (Page_allocator_significant_ptr_bits - Pagetable_entry_log)
 #define Pagetable_size (((int)1 << Pagetable_log))
 #define Pagetable_initial_size                                  \
   (((int)1 << (Pagetable_initial_bits - Pagetable_entry_log)))
@@ -112,8 +114,8 @@ static int page_table_commit(intnat start, intnat end)
   return ret;
 }
 
-// Assumes that the caller owns the mapping from start to end, to
-// ensure that we are not racing to set the same entry twice.
+// Assumes that the caller owns the mapping from start to end, so we
+// know that are not racing to set the same entry twice.
 // Idempotent (returns 0 even if some page table entries are already
 // set to [kind]).
 int caml_page_table_add(int kind, void * start, void * end)

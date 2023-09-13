@@ -684,7 +684,7 @@ void caml_init_gc (uintnat minor_size, uintnat major_size,
   major_bsize = ((major_bsize + Page_size - 1) >> Page_log) << Page_log;
 
   caml_mem_os_init();
-  if (caml_page_table_initialize(Bsize_wsize(minor_size) + major_bsize)){
+  if (caml_page_table_initialize(Bsize_wsize(minor_size) + major_bsize) == -1){
     caml_fatal_error ("cannot initialize page table");
   }
   caml_set_minor_heap_size (Bsize_wsize (norm_minsize (minor_size)));
