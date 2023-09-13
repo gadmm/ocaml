@@ -17,18 +17,13 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <unistd.h>
 #include <stdbool.h>
 #include "caml/pages.h"
 #include "caml/platform.h"
 #include "caml/skiplist.h"
 
-#ifdef __linux__
-#include <fcntl.h>
-#endif
-
-#ifdef __FreeBSD__
-#include <sys/sysctl.h>
+#ifdef HAS_UNISTD
+#include <unistd.h>
 #endif
 
 #ifdef _WIN32
@@ -44,6 +39,14 @@ static bool caml_os_overcommit = false;
    Copyright (c) 2018-2023, Microsoft Research, Daan Leijen
    You can redistribute it and/or modify it under the terms of the MIT license.
 */
+
+#ifdef __linux__
+#include <fcntl.h>
+#endif
+
+#ifdef __FreeBSD__
+#include <sys/sysctl.h>
+#endif
 
 static bool unix_detect_overcommit(void) {
   bool os_overcommit = true;
