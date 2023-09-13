@@ -98,6 +98,7 @@ static char * mem_reserve_os(asize_t size, asize_t align)
   char *block;
   asize_t request_virtual;
   bool failed;
+  bool contiguous = false;
 #ifndef _WIN32
   static char *last_mem = NULL;
   static asize_t last_size = 0;
@@ -113,6 +114,7 @@ static char * mem_reserve_os(asize_t size, asize_t align)
   block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   failed = (block == MAP_FAILED);
+  contiguous = (block + request_virtual == last_mem);
 #else // _WIN32
 again:
   block = VirtualAlloc(NULL, request_virtual, MEM_RESERVE, PAGE_NOACCESS);
@@ -125,7 +127,7 @@ again:
   }
   /* Trim to an aligned region */
   /* Prefer contiguous if possible, to avoid holes in the VAS */
-  if (block + request_virtual == last_mem || MMAP_GROWS_DOWN) {
+  if (contiguous || MMAP_GROWS_DOWN) {
     /* This case is likely to happen on Linux, where the mmaped area grows
        downwards */
     mem = (char *) Round_down((uintnat)block + request_virtual - size, align);
@@ -229,15 +231,14 @@ static int mem_commit_os(char *block, asize_t size)
   return 0;
 #else // _WIN32
   void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
-  bool ret == (!!m - 1);
-  if (ret == -1) {
+  if (m == NULL) {
     if (GetLastError() == ERROR_NOT_ENOUGH_MEMORY
         || GetLastError() == ERROR_COMMITMENT_LIMIT)
       errno = ENOMEM;
     else
       errno = EINVAL;
   }
-  return (!!ret) - 1;
+  return (!!m - 1);
 #endif
 }
 
@@ -296,10 +297,11 @@ static void mem_unmap_os(char *block, asize_t size)
   failed = (munmap(block, size) == -1);
   CAMLassert(!failed || errno != EINVAL);
 #else // _WIN32
-  failed = !VirtualFree(mem, 0, MEM_RELEASE);
+  failed = !VirtualFree(block, 0, MEM_RELEASE);
 #endif
   if (failed) {
-    caml_gc_message(0x1000, "decommit %zu bytes at %p failed\n", size, block);
+    caml_gc_message(0x1000, "decommit %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                            " at %p failed\n", size, block);
   };
 }
 
@@ -312,7 +314,8 @@ void caml_mem_unreserve_all(void)
   FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
       char *block = (char *)elem->key;
       asize_t size = (asize_t)elem->data;
-      caml_gc_message(0x1000, "decommit %zu bytes at %p for heaps\n",
+      caml_gc_message(0x1000, "decommit %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                              " at %p for heaps\n",
                       size, block);
       mem_unmap_os(block, size);
     });
@@ -327,12 +330,15 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
   CAMLassert_aligned(size, align);
   mem = mem_reserve_os(size, align);
   if (mem == NULL) {
-    caml_gc_message(0x1000, "reserving %zu bytes with alignment %zu failed\n",
+    caml_gc_message(0x1000, "reserving %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                            " with alignment %" ARCH_SIZET_PRINTF_FORMAT "u"
+                            " failed\n",
                     size, align);
     return NULL;
   }
   CAMLassert_aligned(mem, align);
-  caml_gc_message(0x1000, "reserved %zu bytes with alignment %zu "
+  caml_gc_message(0x1000, "reserved %" ARCH_SIZET_PRINTF_FORMAT "u bytes with"
+                          " alignment %" ARCH_SIZET_PRINTF_FORMAT "u "
                           "at %p for heaps\n", size, align, mem);
   /* remember the mmaped area for cleanup at exit */
   caml_skiplist_insert(&mmaped_areas, (uintnat)mem, (uintnat)size);
@@ -342,7 +348,8 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
 /* can be used to recommit (preserves already-committed mapping) */
 int caml_mem_commit_os(char *block, asize_t size)
 {
-  caml_gc_message(0x1000, "committing %zu bytes at %p for heaps\n",
+  caml_gc_message(0x1000, "committing %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                          " at %p for heaps\n",
                   size, block);
   return mem_commit_os(block, size);
 }
@@ -350,7 +357,8 @@ int caml_mem_commit_os(char *block, asize_t size)
 void caml_mem_decommit_os(char * block, asize_t size)
 {
   if (size == 0) return;
-  caml_gc_message(0x1000, "decommitting %zu bytes at %p for heaps\n",
+  caml_gc_message(0x1000, "decommitting %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                          " at %p for heaps\n",
                   size, block);
   mem_decommit_os(block, size);
 }
