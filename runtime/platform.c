@@ -18,12 +18,67 @@
 #include <assert.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdbool.h>
 #include <sys/mman.h>
 #include "caml/pages.h"
 #include "caml/platform.h"
 #include "caml/skiplist.h"
 
-uintnat caml_real_page_size = 0;
+#ifdef __linux__
+#include <fcntl.h>
+#endif
+
+#ifdef __FreeBSD__
+#include <sys/sysctl.h>
+#endif
+
+uintnat caml_real_page_size = Page_size;
+static bool caml_os_overcommit = false;
+
+/* The following function is from mimalloc.
+   Copyright (c) 2018-2023, Microsoft Research, Daan Leijen
+   You can redistribute it and/or modify it under the terms of the MIT license.
+*/
+
+static bool unix_detect_overcommit(void) {
+  bool os_overcommit = true;
+#if defined(__linux__)
+  int fd = open("/proc/sys/vm/overcommit_memory", O_RDONLY);
+  if (fd >= 0) {
+    char buf[32];
+    ssize_t nread = read(fd, &buf, sizeof(buf));
+    close(fd);
+    // <https://www.kernel.org/doc/Documentation/vm/overcommit-accounting>
+    // 0: heuristic overcommit, 1: always overcommit,
+    // 2: never overcommit (ignore NORESERVE)
+    if (nread >= 1) {
+      os_overcommit = (buf[0] == '0' || buf[0] == '1');
+    }
+  }
+#elif defined(__FreeBSD__)
+  int val = 0;
+  size_t olen = sizeof(val);
+  if (sysctlbyname("vm.overcommit", &val, &olen, NULL, 0) == 0) {
+    os_overcommit = (val != 0);
+  }
+#elif defined(__APPLE__)
+  os_overcommit = false;
+#else
+  // default: overcommit is true
+#endif
+  return os_overcommit;
+}
+
+/* End of MIT license. */
+
+void caml_mem_os_init(void)
+{
+#ifndef _WIN32
+  caml_real_page_size = sysconf(_SC_PAGESIZE);
+  CAMLassert(caml_real_page_size >= Page_size);
+  caml_os_overcommit = unix_detect_overcommit();
+#endif
+}
 
 /* Reservation, platform-specific */
 

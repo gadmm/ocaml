@@ -53,6 +53,7 @@ char *caml_mem_reserve_os(asize_t size, asize_t align);
 int caml_mem_commit_os(char *block, asize_t size);
 void caml_mem_decommit_os(char * block, asize_t size);
 
+void caml_mem_os_init(void);
 void caml_mem_unreserve_all(void);
 
 #ifdef __cplusplus

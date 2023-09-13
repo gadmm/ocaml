@@ -30,6 +30,7 @@
 #include "caml/misc.h"
 #include "caml/mlvalues.h"
 #include "caml/pages.h"
+#include "caml/platform.h"
 #include "caml/signals.h"
 #include "caml/eventlog.h"
 #ifdef NATIVE_CODE
@@ -682,6 +683,7 @@ void caml_init_gc (uintnat minor_size, uintnat major_size,
   major_bsize = Bsize_wsize(major_size);
   major_bsize = ((major_bsize + Page_size - 1) >> Page_log) << Page_log;
 
+  caml_mem_os_init();
   if (caml_page_table_initialize(Bsize_wsize(minor_size) + major_bsize)){
     caml_fatal_error ("cannot initialize page table");
   }
