@@ -82,8 +82,6 @@ int caml_page_table_initialize(mlsize_t bytesize)
   if (block == MAP_FAILED) return -1;
   /* Kernel addresses are represented with negative offsets */
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
-  caml_real_page_size = sysconf(_SC_PAGESIZE);
-  CAMLassert(caml_real_page_size >= Page_size);
   /* Commit initial portion */
   ret = mprotect(caml_heap_table - (Pagetable_initial_size / 2),
                  Pagetable_initial_size, PROT_READ | PROT_WRITE);
