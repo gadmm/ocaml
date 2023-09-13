@@ -19,7 +19,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
-#include <sys/mman.h>
 #include "caml/pages.h"
 #include "caml/platform.h"
 #include "caml/skiplist.h"
@@ -34,6 +33,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/mman.h>
 #endif
 
 uintnat caml_real_page_size = Page_size;
