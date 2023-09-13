@@ -235,6 +235,20 @@ CAMLnoreturn_end;
 #define CAMLassert(x) ((void) 0)
 #endif
 
+#ifdef CAML_INTERNALS
+
+#define CAMLassert_aligned_(n, m)                     \
+  (CAMLassert(((uintnat)n & ((uintnat)m - 1)) == 0))
+#define CAMLassert_aligned(n, m)                          \
+  (CAMLassert_is_power_of_2(m),CAMLassert_aligned_(n,m))
+#define CAMLassert_is_power_of_2(n) CAMLassert_aligned_(n, n)
+
+#define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
+#define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
+#define Is_aligned(n, mod) ((uintnat)(n) == Round_down((uintnat)(n), mod))
+
+#endif /* CAML_INTERNALS */
+
 /* This hook is called when a fatal error occurs in the OCaml
    runtime. It is given arguments to be passed to the [vprintf]-like
    functions in order to synthetize the error message.
