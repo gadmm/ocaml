@@ -53,9 +53,10 @@ static uintnat pa_size_key(page_allocator *pa, char *block, asize_t size)
 static void pa_remove_free(page_allocator *pa, char *block, asize_t size)
 {
   uintnat key = pa_size_key(pa, block, size);
-  caml_skiplist_remove(&pa->free_per_address_sk, (uintnat)block)
-    ?: CAMLassert(0);
-  caml_skiplist_remove(&pa->free_per_size_sk, key) ?: CAMLassert(0);
+  if (!caml_skiplist_remove(&pa->free_per_address_sk, (uintnat)block))
+    CAMLassert(0);
+  if (!caml_skiplist_remove(&pa->free_per_size_sk, key))
+    CAMLassert(0);
 }
 
 // assumes (block, size) is not a member of the freelist and size < Size_max.
@@ -93,7 +94,8 @@ static int pa_find_above_size(page_allocator *pa, asize_t size,
                                pa_size_key(pa, NULL, size),
                                &key, &address)) {
     *block_out = (char *)address;
-    pa_find_address(pa, *block_out, available_out) ?: CAMLassert(0);
+    if (!pa_find_address(pa, *block_out, available_out))
+      CAMLassert(0);
     return 1;
   }
   return 0;
