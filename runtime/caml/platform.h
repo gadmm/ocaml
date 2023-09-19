@@ -52,6 +52,15 @@ CAMLextern uintnat caml_real_page_size;
 #define MMAP_GROWS_DOWN 0
 #endif
 
+/* On Windows, reservations do not coalesce; one must be careful not
+   to cross reservation boundaries with [caml_mem_commit_os] and
+   [caml_mem_decommit_os]. */
+#ifdef _WIN32
+#define MMAP_COALESCES_RESERVATIONS 0
+#else
+#define MMAP_COALESCES_RESERVATIONS 1
+#endif
+
 char *caml_mem_reserve_os(asize_t size, asize_t align);
 int caml_mem_commit_os(char *block, asize_t size);
 void caml_mem_decommit_os(char * block, asize_t size);
