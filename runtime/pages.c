@@ -91,15 +91,22 @@ int caml_heap_commit(asize_t request, char **out_block,
   char *block;
   asize_t reserved;
   if (!caml_pa_alloc(&heap_allocator, request, &block, &reserved)) {
-    // Out of already-reserved space
+    /* Out of already-reserved space, reserve a large-enough space */
     char *mem;
     asize_t new_reserve;
-    // Reserve a large-enough space
-    if (-1 == caml_mem_reserve(request, In_heap, &mem, &new_reserve))
+    /* We add a padding before and after to prevent coalescing of
+       distinct reservations (VirtualAlloc/VirtualFree semantics). */
+    asize_t padding = MMAP_COALESCES_RESERVATIONS ? 0 : Huge_page_size;
+    asize_t new_request = request + 2 * padding;
+    if (-1 == caml_mem_reserve(new_request, In_heap, &mem, &new_reserve))
       return -1;
-    caml_pa_merge(&heap_allocator, mem, new_reserve);
+    CAMLassert_aligned(mem, Huge_page_size);
+    CAMLassert_aligned(new_reserve, Huge_page_size);
+    CAMLassert_aligned(padding, Huge_page_size);
+    caml_pa_merge(&heap_allocator, mem + padding, new_reserve - 2 * padding);
     // Now it should succeed
-    caml_pa_alloc(&heap_allocator, request, &block, &reserved) ?: CAMLassert(0);
+    if (!caml_pa_alloc(&heap_allocator, request, &block, &reserved))
+      CAMLassert(0);
   }
   if (-1 == caml_mem_commit(block, request, &request)) goto err;
   *out_block = block;

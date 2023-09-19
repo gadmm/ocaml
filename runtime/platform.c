@@ -228,18 +228,17 @@ static int mem_commit_os(char *block, asize_t size)
     /* TODO: restore hugetlb behaviour for backwards-compat. */
   }
 #endif
-  return 0;
 #else // _WIN32
   void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
   if (m == NULL) {
-    if (GetLastError() == ERROR_NOT_ENOUGH_MEMORY
-        || GetLastError() == ERROR_COMMITMENT_LIMIT)
-      errno = ENOMEM;
-    else
-      errno = EINVAL;
+    bool oom =
+      GetLastError() == ERROR_NOT_ENOUGH_MEMORY
+      || GetLastError() == ERROR_COMMITMENT_LIMIT;
+    errno = oom ? ENOMEM : EINVAL;
+    return -1;
   }
-  return (!!m - 1);
 #endif
+  return 0;
 }
 
 static void mem_decommit_os(char * block, asize_t size)
