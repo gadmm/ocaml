@@ -15,6 +15,8 @@
 #ifndef CAML_TSAN_H
 #define CAML_TSAN_H
 
+#include <stdatomic.h>
+
 /* Macro used to deactivate thread sanitizer on some functions. */
 #define CAMLreally_no_tsan
 /* __has_feature is Clang-specific, but GCC defines __SANITIZE_ADDRESS__ and
@@ -70,6 +72,12 @@ CAMLextern void caml_tsan_entry_on_resume(uintnat pc, char* sp,
 extern void __tsan_func_exit(void*);
 extern void __tsan_func_entry(void*);
 void __tsan_write8(void *location);
+uint64_t __tsan_atomic64_load(void*, int);
+
+Caml_inline uintnat __tsan_uintnat_load(atomic_uintnat *p)
+{
+  return (uintnat) __tsan_atomic64_load(p, memory_order_relaxed);
+}
 
 
 #endif /* CAML_INTERNALS */
