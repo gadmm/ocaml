@@ -174,6 +174,9 @@ CAMLexport void caml_enter_blocking_section(void)
       caml_raise_if_exception(caml_process_pending_signals_exn());
     }
     caml_enter_blocking_section_hook ();
+    /* Run TSan's pending signals. The signal handlers run _after_ the
+       load, so we need to reload. */
+    __tsan_atomic64_load(&domain->young_limit, memory_order_relaxed);
     /* Check again if a signal arrived in the meanwhile. If none,
        done; otherwise, try again. Since we do not hold the domain
        lock, we cannot read [young_ptr] and we cannot call

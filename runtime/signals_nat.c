@@ -29,6 +29,7 @@
 #include "caml/osdeps.h"
 #include "caml/signals.h"
 #include "caml/stack.h"
+#include "caml/tsan.h"
 
 /* This routine is the common entry point for garbage collection
    and signal handling.  It can trigger a callback to OCaml code.
@@ -51,8 +52,8 @@ void caml_garbage_collection(void)
   uintnat retaddr = Saved_return_address(sp);
 
   /* Synchronise for the case when [young_limit] was used to interrupt
-     us. */
-  atomic_thread_fence(memory_order_acquire);
+     us and run TSan pending signals */
+  __tsan_atomic64_load(&dom_st->young_limit, memory_order_acquire);
 
   { /* Find the frame descriptor for the current allocation */
     d = caml_find_frame_descr(fds, retaddr);

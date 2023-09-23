@@ -541,6 +541,47 @@ static uintnat fresh_domain_unique_id(void) {
     return next;
 }
 
+/* The poke thread: interrupt the domain periodically to force running
+   TSan's pending signals. */
+
+static void * caml_thread_poke(void * arg)
+{
+  int *domain_id = (int *) arg;
+
+  caml_init_domain_self(*domain_id);
+
+  while(true /* TODO: Should we join this thread? */) {
+    usleep(1000);
+    caml_interrupt_self();
+  }
+  return NULL;
+}
+
+static int create_poke_thread(void)
+{
+  int err;
+#ifdef POSIX_SIGNALS
+  sigset_t mask, old_mask;
+
+  /* Block all signals, so that we do not try to execute a C signal
+     handler in the new tick thread. */
+  sigfillset(&mask);
+  pthread_sigmask(SIG_BLOCK, &mask, &old_mask);
+#endif
+
+  pthread_t thr;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  err = pthread_create(&thr, &attr, caml_thread_poke, (void *)&Caml_state->id);
+
+#ifdef POSIX_SIGNALS
+  pthread_sigmask(SIG_SETMASK, &old_mask, NULL);
+#endif
+
+  return err;
+}
+
 /* must be run on the domain's thread */
 static void domain_create(uintnat initial_minor_heap_wsize) {
   dom_internal* d = 0;
@@ -704,6 +745,7 @@ static void domain_create(uintnat initial_minor_heap_wsize) {
 
   caml_reset_young_limit(domain_state);
   add_to_stw_domains(domain_self);
+  create_poke_thread(); // TODO error handling
   goto domain_init_complete;
 
 alloc_main_stack_failure:

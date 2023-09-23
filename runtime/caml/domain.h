@@ -28,6 +28,7 @@ extern "C" {
 #include "mlvalues.h"
 #include "domain_state.h"
 #include "platform.h"
+#include "tsan.h"
 
 /* The runtime currently has a hard limit on the number of domains.
    This hard limit may go away in the future. */
@@ -44,8 +45,8 @@ Caml_inline int caml_check_gc_interrupt(caml_domain_state * dom_st)
   uintnat young_limit = atomic_load_relaxed(&dom_st->young_limit);
   if ((uintnat)dom_st->young_ptr < young_limit) {
     /* Synchronise for the case when [young_limit] was used to interrupt
-       us. */
-    atomic_thread_fence(memory_order_acquire);
+       us and run TSan pending signals */
+    __tsan_atomic64_load(&dom_st->young_limit, memory_order_acquire);
     return 1;
   }
   return 0;
