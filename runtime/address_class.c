@@ -35,9 +35,8 @@ atomic_char *caml_heap_table = NULL;
    could exclude the kernel space, though we do not).
 
    (This represents approx 4 MB mapped initially to the zero page.
-   This does not consume physical memory apart from a couple of pages
-   later, and on overcommitting systems the zero-mapped pages do not
-   count towards a memory limit.)
+   This does not consume physical memory apart the couple of pages
+   that are modified later on.)
 
    Can be set to zero if we require that page_table_commit or
    caml_page_table_add is required to announce out-of-heap areas
@@ -72,6 +71,7 @@ int caml_page_table_initialize(mlsize_t bytesize)
 #ifdef ARCH_SIXTYFOUR
   void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
 #else
+  /* On 32-bit, the table is smaller than a page */
   void *block = caml_stat_alloc_noexc(Pagetable_size);
 #endif
   if (block == NULL) return -1;
