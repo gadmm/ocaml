@@ -30,21 +30,25 @@ atomic_char *caml_heap_table = NULL;
 #ifdef ARCH_SIXTYFOUR
 #ifndef NO_NAKED_POINTER
 /* Determines area committed up-front for the page table. It should
-   remains at most 48 bits even on 57-bit address spaces as this is
+   remain at most 49 bits even on 57-bit address spaces as this is
    all that is needed for backwards-compatibility (in the same way we
-   could exclude the kernel space, though we do not).
+   could exclude the kernel space under linux, though we do not).
 
-   (This represents approx 4 MB mapped initially to the zero page.
+   (This represents 4 MB mapped initially to the zero page.
    This does not consume physical memory apart the couple of pages
    that are modified later on.)
 
    Can be set to zero if we require that page_table_commit or
    caml_page_table_add is required to announce out-of-heap areas
    beforehand. */
+#ifdef TARGET_arm64
+#define Pagetable_initial_bits 49
+#else
 #define Pagetable_initial_bits 48
+#endif
 #else
 /* Commit the page table on demand; no need to support unannounced naked
-   pointers. */
+   pointers. (TODO: FIXME?) */
 #define Pagetable_initial_bits 0
 #endif
 #else
@@ -67,7 +71,7 @@ atomic_char *caml_heap_table = NULL;
 #endif
 #endif /* !defined(static_assert) */
 
-static_assert(Pagetable_log < 8 * sizeof(int), "invalid page sizes");
+static_assert(Pagetable_log < 8 * sizeof(int) - 1, "invalid page sizes");
 static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
 int caml_page_table_initialize(mlsize_t bytesize)
