@@ -201,6 +201,19 @@ static int mem_commit_os(char *block, asize_t size)
         - MADV_DODUMP, MADV_CORE. Darwin: none.
      Can we ensure it fails on OOM if overcommitting is off? */
   adjust_to_page(&block, &size);
+#ifdef MADV_HUGEPAGE // Linux
+  if (caml_use_huge_pages
+      && (uintnat)block == Round_down((uintnat)block, Huge_page_size)
+      && (uintnat)size == Round_down((uintnat)size, Huge_page_size)) {
+    /* Request huge pages (THP) if huge pages are enabled and the
+       region is Huge-page-aligned. Note: this can cause large pauses
+       if /sys/kernel/mm/transparent_hugepage/defrag is set to
+       [always], [madvise] or [defer+madvise], since OCaml will try to
+       touch a lot of huge pages at once. [defer] is preferred. */
+    madvise_os(block, size, MADV_HUGEPAGE); // ignore error
+    /* TODO: restore hugetlb behaviour for backwards-compat. */
+  }
+#endif
   if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
 #if defined(MADV_DODUMP)
   /* cancel MADV_DONTDUMP (Linux) */
@@ -214,19 +227,6 @@ static int mem_commit_os(char *block, asize_t size)
      madvise(MADV_FREE_REUSE) has no effect on areas where
      madvise(MADV_FREE_REUSABLE) was not called. */
   madvise_os(block, size, MADV_FREE_REUSE); // ignore error
-#endif
-#ifdef MADV_HUGEPAGE // Linux
-  if (caml_use_huge_pages
-      && (uintnat)block == Round_down((uintnat)block, Huge_page_size)
-      && (uintnat)size == Round_down((uintnat)size, Huge_page_size)) {
-    /* Request huge pages (THP) if huge pages are enabled and the
-       region is Huge-page-aligned. Note: this can cause large pauses
-       if /sys/kernel/mm/transparent_hugepage/defrag is set to
-       [always], [madvise] or [defer+madvise], since OCaml will try to
-       touch a lot of huge pages at once. [defer] is preferred. */
-    madvise_os(block, size, MADV_HUGEPAGE); // ignore error
-    /* TODO: restore hugetlb behaviour for backwards-compat. */
-  }
 #endif
 #else // _WIN32
   void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
