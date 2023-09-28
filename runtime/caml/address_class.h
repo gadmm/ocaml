@@ -113,7 +113,11 @@
 #ifdef ARCH_SIXTYFOUR
 #define Pagetable_entry_log 26 // 64MB
 #else
+#ifdef TARGET_power
+#define Pagetable_entry_log 24 // 16MB
+#else
 #define Pagetable_entry_log 22 // 4MB
+#endif
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
