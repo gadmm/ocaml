@@ -210,7 +210,11 @@ static int mem_commit_os(char *block, asize_t size)
        if /sys/kernel/mm/transparent_hugepage/defrag is set to
        [always], [madvise] or [defer+madvise], since OCaml will try to
        touch a lot of huge pages at once. [defer] is preferred. */
-    madvise_os(block, size, MADV_HUGEPAGE); // ignore error
+    if (-1 == madvise_os(block, size, MADV_HUGEPAGE) && errno == EINVAL) {
+      caml_gc_message(0x1000, "madvise(MADV_HUGEPAGE) failed with EINVAL, "
+                              "disabling huge pages henceforth\n");
+      caml_use_huge_pages = 0;
+    }
     /* TODO: restore hugetlb behaviour for backwards-compat. */
   }
 #endif

@@ -39,10 +39,16 @@ CAMLextern uintnat caml_real_page_size;
 /* There does not seem to be a way to ask the OS for the size of a
    huge page. Some systems have them different from 2MB.
    According to sources:
-     x86-64, arm -> 2MB
-     ppc64 -> 64MB
+     x86-64 -> 2MB
+     arm -> 2MB (& 4KB) or 512MB (& 64 KB)
+     ppc64 -> 16MB
 */
+#ifdef TARGET_power
+#define Huge_page_log 24 // 16MB
+#else
 #define Huge_page_log 21 // 2MB
+#endif
+
 #define Huge_page_size ((uintnat)1 << Huge_page_log)
 
 /* On Linux, mmap grows downwards. This is used heuristically only. */
