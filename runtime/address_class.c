@@ -77,7 +77,7 @@ int caml_page_table_initialize(mlsize_t bytesize)
   void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
 #else
   /* On 32-bit, the table is smaller than a page */
-  void *block = caml_stat_alloc_noexc(Pagetable_size);
+  void *block = caml_stat_calloc_noexc(Pagetable_size, 1);
 #endif
   if (block == NULL) return -1;
   /* Kernel addresses are represented with negative offsets */
