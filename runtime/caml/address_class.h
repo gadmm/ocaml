@@ -74,6 +74,7 @@
 #include "config.h"
 #include "misc.h"
 #include "mlvalues.h"
+#include "page_allocator.h"
 
 /* Use the following macros to test an address for the different classes
    it might belong to. */
@@ -111,7 +112,8 @@
 
 /* Granularity for VAS reservations */
 #ifdef ARCH_SIXTYFOUR
-#define Pagetable_entry_log 26 // 64MB
+#define Pagetable_entry_log                                     \
+  (Page_allocator_significant_ptr_bits - 22) // 64MB for 48bits
 #else
 #ifdef TARGET_power
 #define Pagetable_entry_log 24 // 16MB

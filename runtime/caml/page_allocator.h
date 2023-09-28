@@ -18,6 +18,19 @@
 #ifndef CAML_PAGE_ALLOCATOR_H
 #define CAML_PAGE_ALLOCATOR_H
 
+#ifdef ARCH_SIXTYFOUR
+/* Number of significant bits of pointers on this platform. Affects
+   PA_num_max_log. Must be at least 48 on x86_64 and 49 on Arm64 (48 +
+   TTBRx selection).*/
+#ifdef TARGET_arm64
+#define Page_allocator_significant_ptr_bits 49
+#else
+#define Page_allocator_significant_ptr_bits 48
+#endif
+#else
+#define Page_allocator_significant_ptr_bits 32
+#endif /* ARCH_SIXTYFOUR */
+
 #ifdef CAML_INTERNALS
 
 #ifndef CAML_NAME_SPACE
@@ -31,14 +44,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#ifdef ARCH_SIXTYFOUR
-/* Number of significant bits of pointers on this platform; can
-   support 57 bits etc. Affects PA_num_max_log. */
-#define Page_allocator_significant_ptr_bits 48
-#else
-#define Page_allocator_significant_ptr_bits 32
-#endif /* ARCH_SIXTYFOUR */
 
 /* A best-fit allocator for memory ranges aligned to a big power of 2. */
 
