@@ -128,6 +128,10 @@ void caml_mem_os_init(void)
 #define MADV_FREE_REUSABLE UNDEFINED
 #endif
 
+#ifndef MADV_POPULATE_WRITE
+#define MADV_POPULATE_WRITE UNDEFINED
+#endif
+
 static int madvise_os(char *block, asize_t size, int madvice)
 {
   int err;
@@ -148,6 +152,7 @@ static int madvise_os(char *block, asize_t size, int madvice)
     if (madvice == MADV_HUGEPAGE) str = "MADV_HUGEPAGE";
     if (madvice == MADV_DONTDUMP) str = "MADV_DONTDUMP";
     if (madvice == MADV_NOCORE) str = "MADV_NOCORE";
+    if (madvice == MADV_POPULATE_WRITE) str = "MADV_POPULATE_WRITE";
     caml_gc_message(0x1000,
                     "madvise failed (block=%p, "
                     "size=%" ARCH_SIZET_PRINTF_FORMAT "u, advice=%s) "
@@ -273,7 +278,7 @@ static int mem_commit_os(char *block, asize_t size)
   /* - Commit:
         - MADV_FREE_REUSE on Darwin
         - MADV_DODUMP, MADV_CORE. Darwin: none.
-     Can we ensure it fails on OOM if overcommitting is off? */
+     Try to ensure it fails on OOM. */
   adjust_to_page(&block, &size);
   /* Huge pages on Linux */
   if (MADV_HUGEPAGE != UNDEFINED
@@ -303,6 +308,15 @@ static int mem_commit_os(char *block, asize_t size)
       return -1;
     }
   }
+  /* Linux */
+  if (MADV_POPULATE_WRITE != UNDEFINED) {
+    /* Populate all pages at once, and guarantee no SIGBUS with
+       overcommitting. */
+    if (-1 == madvise_os(block, size, MADV_POPULATE_WRITE)) {
+      caml_gc_message(0x1000, "out of memory (failed to populate mapping)");
+      return -1;
+    }
+  }
 #else // _WIN32
   void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
   if (m == NULL) {
@@ -329,21 +343,23 @@ static void mem_decommit_os(char * block, asize_t size)
   /* - Decommit:
         - MADV_DONTNEED on Linux with overcommitting
           cf. https://github.com/golang/go/issues/42330
-        - MADV_FREE on BSD
+        - MADV_FREE on BSD (except FreeBSD without overcommitting)
           and Haiku, MADV_FREE_REUSABLE on Darwin, MADV_DONTNEED as a
           fallback, posix_madvise & POSIX_MADV_DONTNEED as a fallback?
         - mmap(PROT_NONE,MAP_FIXED) to decommit in Linux without
-          overcommitting (see jemalloc,glibc malloc)
-          (https://github.com/bminor/glibc/commit/9fab36eb58)
+          overcommitting (see glibc malloc:
+          https://github.com/bminor/glibc/commit/9fab36eb58). We
+          assume we have to do something similar for FreeBSD without
+          overcommitting.
         - MADV_FREE exists on Linux, so be careful about #ifdef.
           MADV_FREE is more lazy in reclaiming memory, so we prefer
           MADV_DONTNEED here since we decommit when we really want to free
-          memory.
+          memory. (see e.g. Go, mimalloc)
         - MADV_DONTDUMP on Linux, MADV_NOCORE on BSD. (Not needed for
           core files, but seems to help gdb) Darwin: NONE  */
   int advice;
   adjust_to_page(&block, &size);
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
   if (!caml_os_overcommit) {
     void *res = mmap(block, size, PROT_NONE,
                      MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
