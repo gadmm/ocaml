@@ -17,6 +17,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <string.h>
 #include "caml/address_class.h"
 #include "caml/memory.h"
 #include "caml/pages.h"
@@ -76,14 +77,14 @@ static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
 int caml_page_table_initialize(mlsize_t bytesize)
 {
-  int ret = 0;
 #ifdef ARCH_SIXTYFOUR
+  int ret = 0;
   void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
 #else
   /* On 32-bit, the table is smaller than a page */
   void *block = caml_stat_calloc_noexc(Pagetable_size, 1);
 #endif
-  if (block == NULL) return -1;
+  if (block == NULL) goto err;
   /* Kernel addresses are represented with negative offsets */
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
 #ifdef ARCH_SIXTYFOUR
@@ -91,21 +92,30 @@ int caml_page_table_initialize(mlsize_t bytesize)
   ret = caml_mem_commit_os((char *)caml_heap_table - (Pagetable_initial_size/2),
                            Pagetable_initial_size);
   CAMLassert(ret != -1 || errno == ENOMEM);
+  if (ret == -1) goto err;
 #endif
-  return ret;
+  return 0;
+ err:
+  caml_gc_message(0x1000,
+                  "page table allocation failed "
+                  "(reserving %u bytes, committing %u bytes), "
+                  "strerror()=%s\n",
+                  Pagetable_size, Pagetable_initial_size, strerror(errno));
+  return -1;
 }
 
 /* This is called infrequently, and for a small portion of
    caml_heap_table, thanks to the hints given to mmap inside
    [caml_alloc_for_heap] which tends to reserve heap inside
    already-committed pages of caml_heap_table. */
-static int page_table_commit(intnat start, intnat end)
+static int page_table_commit(int start, int end)
 {
   int ret = 0;
 #ifdef ARCH_SIXTYFOUR
-  intnat page_start = Round_down(start, Real_page_size);
-  intnat page_end = Round_up(end, Real_page_size);
-  uintnat size = page_end - page_start;
+  int page_start = Round_down(start, Real_page_size);
+  int page_end = Round_up(end, Real_page_size);
+  intnat size = (intnat)page_end - (intnat)page_start;
+  CAMLassert(start < end);
   if (page_start >= -(Pagetable_initial_size / 2)
       && page_end <= Pagetable_initial_size / 2) {
     /* Part of the initial portion already committed, avoid a
@@ -116,6 +126,12 @@ static int page_table_commit(intnat start, intnat end)
   CAMLassert(page_end <= Pagetable_size / 2);
   ret = caml_mem_commit_os((char *)&caml_heap_table[page_start], size);
   CAMLassert(ret != -1 || errno == ENOMEM);
+  if (ret == -1) {
+    caml_gc_message(0x1000,
+                    "failed to commit page table "
+                    "(start=%d, end=%d), strerror()=%s\n",
+                    start, end, strerror(errno));
+  }
 #endif
   return ret;
 }
@@ -130,6 +146,7 @@ int caml_page_table_add(int kind, void * start, void * end)
   int pend = Pagetable_entry((intnat)end - 1) + 1;
   int p;
   int ret = 0;
+  if (end < start) return -1;
   if (-1 == page_table_commit(pstart, pend)) return -1;
   for (p = pstart; p < pend; p++) {
     char e = 0;
@@ -159,7 +176,14 @@ int caml_page_table_add(int kind, void * start, void * end)
       // to see all the naked pointers before OCaml acquires the
       // mapping, except in situations where the outside world
       // declared their pages of interest in advances).
-      if (e != kind) ret = -1;
+      if (e != kind) {
+        caml_gc_message(0x1000,
+                        "failed to set page table "
+                        "(start=%p, end=%p, pstart=%d, pend=%d, p=%d, "
+                        "old_kind=%d, new_kind=%d)\n",
+                        start, end, pstart, pend, p, e, kind);
+        ret = -1;
+      }
     }
   }
   return ret;

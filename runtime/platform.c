@@ -18,6 +18,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
+#include <string.h>
 #include "caml/pages.h"
 #include "caml/platform.h"
 #include "caml/skiplist.h"
@@ -88,7 +89,85 @@ void caml_mem_os_init(void)
 #endif
 }
 
+
 /* Reserving & committing memory, platform-specific */
+
+#ifndef _WIN32
+
+#define UNDEFINED -1
+
+#ifndef MADV_HUGEPAGE
+#define MADV_HUGEPAGE UNDEFINED
+#endif
+
+#ifndef MADV_DODUMP
+#define MADV_DODUMP UNDEFINED
+#endif
+
+#ifndef MADV_DONTDUMP
+#define MADV_DONTDUMP UNDEFINED
+#endif
+
+#ifndef MADV_CORE
+#define MADV_CORE UNDEFINED
+#endif
+
+#ifndef MADV_NOCORE
+#define MADV_NOCORE UNDEFINED
+#endif
+
+#ifndef MADV_FREE
+#define MADV_FREE UNDEFINED
+#endif
+
+#ifndef MADV_FREE_REUSE
+#define MADV_FREE_REUSE UNDEFINED
+#endif
+
+#ifndef MADV_FREE_REUSABLE
+#define MADV_FREE_REUSABLE UNDEFINED
+#endif
+
+static int madvise_os(char *block, asize_t size, int madvice)
+{
+  int err;
+  CAMLassert(madvice != UNDEFINED);
+  err = madvise(block, size, madvice);
+  /* Note: there is no evidence that one should retry on EAGAIN */
+  if (err == -1) {
+    char * str = "(unknown)";
+    /* There is not simple way, but the message is useful as there is
+       no other way to know that an error happens in the cases where
+       our result is ignored. */
+    if (madvice == MADV_DODUMP) str = "MADV_DODUMP";
+    if (madvice == MADV_CORE) str = "MADV_CORE";
+    if (madvice == MADV_FREE) str = "MADV_FREE";
+    if (madvice == MADV_DONTNEED) str = "MADV_DONTNEED";
+    if (madvice == MADV_FREE_REUSE) str = "MADV_FREE_REUSE";
+    if (madvice == MADV_FREE_REUSABLE) str = "MADV_FREE_REUSABLE";
+    if (madvice == MADV_HUGEPAGE) str = "MADV_HUGEPAGE";
+    if (madvice == MADV_DONTDUMP) str = "MADV_DONTDUMP";
+    if (madvice == MADV_NOCORE) str = "MADV_NOCORE";
+    caml_gc_message(0x1000,
+                    "madvise failed (block=%p, "
+                    "size=%" ARCH_SIZET_PRINTF_FORMAT "u, advice=%s) "
+                    "with error: %s\n",
+                    block, size, str, strerror(errno));
+  }
+  return err;
+}
+
+/* enable/cancel MADV_DONTDUMP (Linux) / MADV_NOCORE (FreeBSD), ignore
+   errors. */
+static void madvise_dodump(char *block, asize_t size, bool dodump)
+{
+  int madvice = UNDEFINED;
+  if (MADV_DODUMP != UNDEFINED) madvice = dodump ? MADV_DODUMP : MADV_DONTDUMP;
+  else if (MADV_CORE != UNDEFINED) madvice = dodump ? MADV_CORE : MADV_NOCORE;
+  if (madvice != UNDEFINED) madvise_os(block, size, madvice);
+}
+
+#endif
 
 static void mem_unmap_os(char *block, asize_t size);
 
@@ -97,7 +176,6 @@ static char * mem_reserve_os(asize_t size, asize_t align)
   char *mem;
   char *block;
   asize_t request_virtual;
-  bool failed;
   bool contiguous = false;
 #ifndef _WIN32
   static char *last_mem = NULL;
@@ -113,14 +191,13 @@ static char * mem_reserve_os(asize_t size, asize_t align)
   /* Hint at the end of the previously-reserved block */
   block = mmap(last_mem + last_size, request_virtual, PROT_NONE,
                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  failed = (block == MAP_FAILED);
+  if (block == MAP_FAILED) goto err;
   contiguous = (block + request_virtual == last_mem);
 #else // _WIN32
-again:
+ again:
   block = VirtualAlloc(NULL, request_virtual, MEM_RESERVE, PAGE_NOACCESS);
-  failed = (block == NULL);
+  if (block == NULL) goto err;
 #endif
-  if (failed) return NULL;
   if (align == 0) {
     mem = block;
     goto done;
@@ -141,6 +218,7 @@ again:
   mem_unmap_os(block, mem - block);
   /* free end */
   mem_unmap_os(mem + size, request_virtual - (mem - block) - size);
+  madvise_dodump(mem, size, false);
  done:
   /* [mem..mem+size[ is reserved */
   last_mem = mem;
@@ -162,23 +240,21 @@ again:
       /* Raced - try again. */
       goto again;
     } else {
-      return NULL;
+      goto err;
     }
   }
  done:
 #endif
   return mem;
+ err:
+  caml_gc_message(0x1000,
+                  "failed to reserve aligned memory "
+                  "(%" ARCH_SIZET_PRINTF_FORMAT "u bytes aligned "
+                  "at %" ARCH_SIZET_PRINTF_FORMAT "u)\n",
+                  size, align);
+  return NULL;
 }
 
-#ifndef _WIN32
-
-static int madvise_os(char *block, asize_t size, int madvice)
-{
-  int err;
-  /* EAGAIN is Linux-specific */
-  while (-1 == (err = madvise(block, size, madvice)) && errno == EAGAIN) {};
-  return err;
-}
 
 /* Adjust alignment to page for mprotect/madvise */
 static void adjust_to_page(char **block, asize_t *size)
@@ -191,8 +267,6 @@ static void adjust_to_page(char **block, asize_t *size)
   *block = (char *)start_aligned;
 }
 
-#endif
-
 static int mem_commit_os(char *block, asize_t size)
 {
 #ifndef _WIN32
@@ -201,8 +275,9 @@ static int mem_commit_os(char *block, asize_t size)
         - MADV_DODUMP, MADV_CORE. Darwin: none.
      Can we ensure it fails on OOM if overcommitting is off? */
   adjust_to_page(&block, &size);
-#ifdef MADV_HUGEPAGE // Linux
-  if (caml_use_huge_pages
+  /* Huge pages on Linux */
+  if (MADV_HUGEPAGE != UNDEFINED
+      && caml_use_huge_pages
       && (uintnat)block == Round_down((uintnat)block, Huge_page_size)
       && (uintnat)size == Round_down((uintnat)size, Huge_page_size)) {
     /* Request huge pages (THP) if huge pages are enabled and the
@@ -214,24 +289,20 @@ static int mem_commit_os(char *block, asize_t size)
       caml_gc_message(0x1000, "madvise(MADV_HUGEPAGE) failed with EINVAL, "
                               "disabling huge pages henceforth\n");
       caml_use_huge_pages = 0;
-    }
-    /* TODO: restore hugetlb behaviour for backwards-compat. */
+    } /* otherwise ignore error */
   }
-#endif
-  if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) return -1;
-#if defined(MADV_DODUMP)
-  /* cancel MADV_DONTDUMP (Linux) */
-  madvise_os(block, size, MADV_DODUMP); // ignore error
-#elif defined(MADV_CORE)
-  /* cancel MADV_NOCORE (FreeBSD) */
-  madvise_os(block, size, MADV_CORE); // ignore error
-#endif
-#ifdef MADV_FREE_REUSE
-  /* cancel MADV_FREE_REUSABLE (Darwin). Calling
-     madvise(MADV_FREE_REUSE) has no effect on areas where
-     madvise(MADV_FREE_REUSABLE) was not called. */
-  madvise_os(block, size, MADV_FREE_REUSE); // ignore error
-#endif
+  if (-1 == mprotect(block, size, PROT_READ | PROT_WRITE)) goto err;
+  madvise_dodump(block, size, true);
+  /* Darwin */
+  if (MADV_FREE_REUSE != UNDEFINED) {
+    /* cancel MADV_FREE_REUSABLE. Calling madvise(MADV_FREE_REUSE) has
+       no effect on areas where madvise(MADV_FREE_REUSABLE) was not
+       called. */
+    if (-1 == madvise_os(block, size, MADV_FREE_REUSE)) {
+      caml_gc_message(0x1000, "out of memory (failed to reuse mapping)");
+      return -1;
+    }
+  }
 #else // _WIN32
   void *m = VirtualAlloc((void*)block, size, MEM_COMMIT, PAGE_READWRITE);
   if (m == NULL) {
@@ -239,10 +310,17 @@ static int mem_commit_os(char *block, asize_t size)
       GetLastError() == ERROR_NOT_ENOUGH_MEMORY
       || GetLastError() == ERROR_COMMITMENT_LIMIT;
     errno = oom ? ENOMEM : EINVAL;
-    return -1;
+    goto err;
   }
 #endif
   return 0;
+ err:
+  caml_gc_message(0x1000,
+                  "failed to commit mapping "
+                  "(block=%p, size=%" ARCH_SIZET_PRINTF_FORMAT "u), "
+                  "error=%s\n",
+                  block, size, strerror(errno));
+  return -1;
 }
 
 static void mem_decommit_os(char * block, asize_t size)
@@ -267,45 +345,49 @@ static void mem_decommit_os(char * block, asize_t size)
   adjust_to_page(&block, &size);
 #if defined(__linux__)
   if (!caml_os_overcommit) {
-    mmap(block, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
-         -1, 0);
+    void *res = mmap(block, size, PROT_NONE,
+                     MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (res == MAP_FAILED) {
+      CAMLassert(errno != EINVAL);
+      goto err;
+    }
     return;
   }
 #endif
-#if defined(MADV_FREE_REUSABLE) // Darwin
-  advice = MADV_FREE_REUSABLE;
-#elif (defined(MADV_FREE) && !defined(__linux__))
-  advice = MADV_FREE;
-#else
-  advice = MADV_DONTNEED;
+  if (MADV_FREE_REUSABLE != UNDEFINED) advice = MADV_FREE_REUSABLE; /* Darwin */
+#ifndef __linux__
+  else if (MADV_FREE != UNDEFINED) advice = MADV_FREE; /* BSDs */
 #endif
-  /* ignore errors */
-  madvise_os(block, size, advice);
-#if defined(MADV_DONTDUMP) // Linux
-  madvise_os(block, size, MADV_DONTDUMP);
-#elif defined(MADV_NOCORE) // FreeBSD
-  madvise_os(block, size, MADV_NOCORE);
-#endif
+  else advice = MADV_DONTNEED; /* Linux and fallback */
+  if (-1 == madvise_os(block, size, advice)) {
+    CAMLassert(errno != EINVAL);
+    goto err;
+  }
+  madvise_dodump(block, size, false);
 #else // _WIN32
-  VirtualFree((void *)block, size, MEM_DECOMMIT);
+  if (!VirtualFree((void *)block, size, MEM_DECOMMIT)) goto err;
 #endif
+ err:
+  caml_gc_message(0x1000, "decommitting %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                  " at %p failed\n", size, block);
+
 }
 
 /* Only accepts full reserved areas */
 static void mem_unmap_os(char *block, asize_t size)
 {
-  bool failed;
   if (size == 0) return;
 #ifndef _WIN32
-  failed = (munmap(block, size) == -1);
-  CAMLassert(!failed || errno != EINVAL);
+  if (munmap(block, size) == -1) {
+    CAMLassert(errno != EINVAL);
+    goto err;
+  }
 #else // _WIN32
-  failed = !VirtualFree(block, 0, MEM_RELEASE);
+  if (!VirtualFree(block, 0, MEM_RELEASE)) goto err;
 #endif
-  if (failed) {
-    caml_gc_message(0x1000, "decommit %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
-                            " at %p failed\n", size, block);
-  };
+ err:
+  caml_gc_message(0x1000, "unmapping %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                  " at %p failed\n", size, block);
 }
 
 /* Wrapped functions */
@@ -317,8 +399,8 @@ void caml_mem_unreserve_all(void)
   FOREACH_SKIPLIST_ELEMENT(elem, &mmaped_areas, {
       char *block = (char *)elem->key;
       asize_t size = (asize_t)elem->data;
-      caml_gc_message(0x1000, "decommit %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
-                              " at %p for heaps\n",
+      caml_gc_message(0x1000, "unmapping %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
+                              " at %p\n",
                       size, block);
       mem_unmap_os(block, size);
     });
