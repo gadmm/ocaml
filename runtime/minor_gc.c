@@ -28,6 +28,7 @@
 #include "caml/misc.h"
 #include "caml/mlvalues.h"
 #include "caml/pages.h"
+#include "caml/platform.h"
 #include "caml/roots.h"
 #include "caml/signals.h"
 #include "caml/weak.h"
@@ -137,10 +138,9 @@ static int realloc_minor_heap(asize_t bsz)
 {
   char *new_heap;
   asize_t new_reserved;
-  asize_t new_bsz;
   if (-1 == caml_mem_reserve(bsz, In_young, &new_heap, &new_reserved))
     return -1;
-  if (-1 == caml_mem_commit(new_heap, bsz, &new_bsz))
+  if (-1 == caml_mem_commit(new_heap, bsz))
     return -1;
   if (Caml_state->young_alloc_start != NULL) {
     caml_mem_decommit((char *)Caml_state->young_alloc_start,
@@ -149,17 +149,18 @@ static int realloc_minor_heap(asize_t bsz)
     // heap cannot grow indefinitely.
   }
   Caml_state->young_alloc_start = (value *) new_heap;
-  Caml_state->young_alloc_end = (value *) (new_heap + new_bsz);
+  Caml_state->young_alloc_end = (value *) (new_heap + bsz);
   Caml_state->young_reserved = new_reserved;
   return 0;
 }
 
-void caml_set_minor_heap_size (asize_t bsz)
+void caml_set_minor_heap_size(asize_t bsz)
 {
   char *heap = (char *)Caml_state->young_alloc_start;
-  CAMLassert (bsz >= Bsize_wsize(Minor_heap_min));
-  CAMLassert (bsz <= Bsize_wsize(Minor_heap_max));
-  CAMLassert (bsz % sizeof (value) == 0);
+  asize_t align =
+    (bsz > Huge_page_size/2 && caml_use_huge_pages) ?
+    Huge_page_size : Real_page_size;
+  CAMLassert_aligned(heap, Huge_page_size);
   if (Caml_state->young_ptr != Caml_state->young_alloc_end){
     CAML_EV_COUNTER (EV_C_FORCE_MINOR_SET_MINOR_HEAP_SIZE, 1);
     Caml_state->requested_minor_gc = 0;
@@ -168,20 +169,20 @@ void caml_set_minor_heap_size (asize_t bsz)
     caml_empty_minor_heap ();
   }
   CAMLassert (Caml_state->young_ptr == Caml_state->young_alloc_end);
-  /* [young_reserved] is at least aligned to [Pagetable_entry_size].
-     The new minor heap size is going to be rounded up to the huge
-     page size, which still fits due to alignment. */
+  bsz = Round_up(bsz, align);
+  CAMLassert (bsz >= Bsize_wsize(Minor_heap_min));
+  CAMLassert (bsz <= Bsize_wsize(Minor_heap_max));
+  CAMLassert (bsz % sizeof (value) == 0);
   if (Caml_state->young_reserved < bsz) {
     // Reallocate the minor heap
     if (-1 == realloc_minor_heap(bsz))
       goto oom;
   } else {
-    asize_t new_bsz;
-    // Grow in place
-    if (-1 == caml_mem_commit(heap, bsz, &new_bsz))
+    // Grow/shrink in place
+    if (-1 == caml_mem_commit(heap, bsz))
       goto oom;
-    caml_mem_decommit(heap + new_bsz, Caml_state->young_reserved - new_bsz);
-    Caml_state->young_alloc_end = (value *) (heap + new_bsz);
+    caml_mem_decommit(heap + bsz, Caml_state->young_reserved - bsz);
+    Caml_state->young_alloc_end = (value *) (heap + bsz);
   }
   /* [young_alloc_start], [young_alloc_end], and [young_reserved] have
      been succesfully updated. */
