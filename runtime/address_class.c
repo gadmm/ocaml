@@ -41,7 +41,7 @@ atomic_char *caml_heap_table = NULL;
    Can be set to zero if we require that page_table_commit or
    caml_page_table_add is required to announce out-of-heap areas
    beforehand. */
-#ifdef TARGET_arm64
+#ifdef __aarch64__
 #define Pagetable_initial_bits 49
 #else
 #define Pagetable_initial_bits 48
