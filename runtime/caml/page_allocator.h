@@ -20,10 +20,9 @@
 
 #ifdef ARCH_SIXTYFOUR
 /* Number of significant bits of pointers on this platform. Affects
-   PA_num_max_log. Must be at least 48 on x86_64 and 49 on Arm64 (48 +
-   TTBRx selection).*/
-#ifdef TARGET_arm64
-#define Page_allocator_significant_ptr_bits 49
+   PA_num_max_log. Can support e.g. 57 bits at some point. */
+#ifdef __aarch64__
+#define Page_allocator_significant_ptr_bits 49 // 48 + TTB selection
 #else
 #define Page_allocator_significant_ptr_bits 48
 #endif

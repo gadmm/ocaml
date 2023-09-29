@@ -43,7 +43,7 @@ CAMLextern uintnat caml_real_page_size;
      arm -> 2MB (& 4KB) or 512MB (& 64 KB)
      ppc64 -> 16MB
 */
-#ifdef TARGET_power
+#ifdef __powerpc64__
 #define Huge_page_log 24 // 16MB
 #else
 #define Huge_page_log 21 // 2MB

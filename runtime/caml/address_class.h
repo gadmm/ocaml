@@ -115,11 +115,7 @@
 #define Pagetable_entry_log                                     \
   (Page_allocator_significant_ptr_bits - 22) // 64MB for 48bits
 #else
-#ifdef TARGET_power
-#define Pagetable_entry_log 24 // 16MB
-#else
 #define Pagetable_entry_log 22 // 4MB
-#endif
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
