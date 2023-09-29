@@ -123,7 +123,13 @@
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_entry_size ((intnat)1 << Pagetable_entry_log)
-#define Pagetable_entry(p) ((intnat)(p) >> Pagetable_entry_log)
+#define TBI 0
+/*
+#define TBI 8 // Arm TBI
+#define TBI 7 // Intel LAM_U57 / AMD UAI
+#define TBI 16 // Intel LAM_U48
+*/
+#define Pagetable_entry(p) (((intnat)(p) << TBI) >> (TBI + Pagetable_entry_log))
 
 #ifndef HAS_ATOMICS
 typedef char atomic_char;
