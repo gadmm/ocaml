@@ -50,14 +50,13 @@ extern uintnat caml_percent_free;                   /* major_gc.c */
 char *caml_alloc_for_heap (asize_t request)
 {
   char *mem, *block;
-  asize_t reserved, committed;
+  asize_t committed;
   request += sizeof(heap_chunk_head);
-  if (-1 == caml_heap_commit(request, &block, &committed, &reserved))
+  if (-1 == caml_heap_commit(request, &block, &committed))
     return NULL;
   mem = block + sizeof(heap_chunk_head);
   Chunk_size(mem) = committed - sizeof(heap_chunk_head);
   Chunk_block(mem) = block;
-  Chunk_block_size(mem) = reserved;
   Chunk_head (mem)->redarken_first.start = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_first.end = (value*)(mem + Chunk_size(mem));
   Chunk_head (mem)->redarken_end = (value*)mem;
@@ -69,7 +68,8 @@ char *caml_alloc_for_heap (asize_t request)
 */
 void caml_free_for_heap (char *mem)
 {
-  caml_heap_decommit(Chunk_block(mem), Chunk_block_size(mem));
+  caml_heap_decommit(Chunk_block(mem),
+                     Chunk_size(mem) + sizeof(heap_chunk_head));
 }
 
 /* Take a chunk of memory as argument, which must be the result of a
