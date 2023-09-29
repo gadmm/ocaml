@@ -29,7 +29,7 @@
 atomic_char *caml_heap_table = NULL;
 
 #ifdef ARCH_SIXTYFOUR
-#ifndef NO_NAKED_POINTER
+#  if !defined(NO_NAKED_POINTER) || defined(DEBUG)
 /* Determines area committed up-front for the page table. It should
    remain at most 49 bits even on 57-bit address spaces as this is
    all that is needed for backwards-compatibility (in the same way we
@@ -42,18 +42,18 @@ atomic_char *caml_heap_table = NULL;
    Can be set to zero if we require that page_table_commit or
    caml_page_table_add is required to announce out-of-heap areas
    beforehand. */
-#ifdef __aarch64__
-#define Pagetable_initial_bits 49
-#else
-#define Pagetable_initial_bits 48
-#endif
-#else
+#    ifdef __aarch64__
+#      define Pagetable_initial_bits 49
+#    else
+#      define Pagetable_initial_bits 48
+#    endif
+#  else
 /* Commit the page table on demand; no need to support unannounced naked
-   pointers. (TODO: FIXME?) */
-#define Pagetable_initial_bits 0
-#endif
+   pointers since `Is_in_heap` is only called inside CAMLassert. */
+#    define Pagetable_initial_bits 0
+#  endif
 #else
-#define Pagetable_initial_bits 32
+#  define Pagetable_initial_bits 32
 #endif /* ARCH_SIXTYFOUR */
 
 #define Pagetable_log                                       \

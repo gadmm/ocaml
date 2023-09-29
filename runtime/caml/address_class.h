@@ -57,8 +57,12 @@
    Note that contrary to expectations, without a page table the GC is
    slightly slower, because an optimised page table check is
    fast-enough that the time gained by not visiting static data for
-   marking becomes predominant. There is no good reason to use the
-   NO_NAKED_POINTERS mode nowadays.
+   marking becomes predominant. There is no more good reasons to adapt
+   programs to the NO_NAKED_POINTERS mode, but unfortunately the
+   semantics still differ (e.g. for ad hoc polymorphic operations).
+   (Note: one solution could be to change the page table to respect
+   the specification "unannounced pointers are assumed static" in the
+   future---dynamic allocation off-heap must be announced beforehand.)
 */
 
 #ifndef CAML_ADDRESS_CLASS_H
