@@ -38,6 +38,8 @@
 #endif
 #include "caml/startup_aux.h"
 
+#include <stdbool.h>
+
 #ifndef NATIVE_CODE
 extern uintnat caml_max_stack_size;    /* defined in stacks.c */
 #endif
@@ -786,4 +788,19 @@ CAMLprim value caml_ml_runtime_warnings_enabled(value unit)
 {
   CAMLassert (unit == Val_unit);
   return Val_bool(caml_runtime_warnings);
+}
+
+static bool arena_active = false;
+
+CAMLprim value caml_install_arena(value unit)
+{
+  bool installed = !arena_active;
+  arena_active = true;
+  return Val_bool(installed);
+}
+
+CAMLprim value caml_remove_arena(value unit)
+{
+  arena_active = false;
+  return Val_unit;
 }
