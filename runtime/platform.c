@@ -140,9 +140,9 @@ static int madvise_os(char *block, asize_t size, int madvice)
   /* Note: there is no evidence that one should retry on EAGAIN */
   if (err == -1) {
     char * str = "(unknown)";
-    /* There is not simple way, but the message is useful as there is
-       no other way to know that an error happens in the cases where
-       our result is ignored. */
+    /* There is no simpler way to convert to a string, but the message
+       is useful as there is no other way to know that an error
+       happens in the cases where our result is ignored. */
     if (madvice == MADV_DODUMP) str = "MADV_DODUMP";
     if (madvice == MADV_CORE) str = "MADV_CORE";
     if (madvice == MADV_FREE) str = "MADV_FREE";
@@ -153,6 +153,7 @@ static int madvise_os(char *block, asize_t size, int madvice)
     if (madvice == MADV_DONTDUMP) str = "MADV_DONTDUMP";
     if (madvice == MADV_NOCORE) str = "MADV_NOCORE";
     if (madvice == MADV_POPULATE_WRITE) str = "MADV_POPULATE_WRITE";
+    if (madvice == UNDEFINED) str = "-1";
     caml_gc_message(0x1000,
                     "madvise failed (block=%p, "
                     "size=%" ARCH_SIZET_PRINTF_FORMAT "u, advice=%s) "
