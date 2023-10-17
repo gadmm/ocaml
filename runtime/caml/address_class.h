@@ -85,8 +85,7 @@
 
 #define Is_young(val) \
   (CAMLassert (Is_block (val)), \
-   (char *)(val) < (char *)Caml_state_field(young_alloc_end) && \
-   (char *)(val) > (char *)Caml_state_field(young_alloc_start))
+   (caml_classify_address((void*)a) & In_young))
 
 #define Is_in_heap(a) (caml_classify_address((void*)a) & In_heap)
 
