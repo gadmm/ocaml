@@ -17,6 +17,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <stdbool.h>
 #include "caml/address_class.h"
 #include "caml/pages.h"
 #include "caml/page_allocator.h"
@@ -66,46 +67,65 @@ void caml_mem_decommit(char * block, asize_t size)
 
 /* VAS allocator for the major heap */
 
-static page_allocator heap_allocator = PA_STATIC_INITIALIZER(Huge_page_log);
+#define Heap_page_log 17 /* 128 KB */
+#define Heap_page_size ((uintnat)1 << Heap_page_log)
+
+CAML_STATIC_ASSERT(Pagetable_entry_size >= Huge_page_size);
+CAML_STATIC_ASSERT(Huge_page_size >= Heap_page_size);
+
+static page_allocator heap_allocator = PA_STATIC_INITIALIZER(Heap_page_log);
+static page_allocator huge_allocator = PA_STATIC_INITIALIZER(Huge_page_log);
 
 int caml_heap_commit(asize_t request, char **out_block, asize_t *out_size)
 {
   char *block;
   asize_t obtained;
-  if (!caml_pa_alloc(&heap_allocator, request, &block, &obtained)) {
+
+  /* Allocate a huge-aligned region if the request is almost huge. If
+     [caml_use_huge_pages] is true, this will result in the allocation
+     of a huge page. */
+  bool huge = request > Huge_page_size / 2;
+  page_allocator *page_allocator = huge ? &huge_allocator : &heap_allocator;
+  asize_t page_size = huge ? Huge_page_size : Heap_page_size;
+
+  CAMLassert(Heap_page_size >= Real_page_size);
+
+  if (!caml_pa_alloc(page_allocator, request, &block, &obtained)) {
     /* Out of already-reserved space, reserve a large-enough space */
     char *mem;
     asize_t reserved;
     /* We add a padding before and after to prevent coalescing of
        distinct reservations (VirtualAlloc/VirtualFree semantics). */
-    asize_t padding = MMAP_COALESCES_RESERVATIONS ? 0 : Huge_page_size;
+    asize_t padding = MMAP_COALESCES_RESERVATIONS ? 0 : page_size;
     asize_t new_request = request + 2 * padding;
     if (-1 == caml_mem_reserve(new_request, In_heap, &mem, &reserved))
       return -1;
-    CAMLassert_aligned(mem, Huge_page_size);
-    CAMLassert_aligned(reserved, Huge_page_size);
-    CAMLassert_aligned(padding, Huge_page_size);
-    caml_pa_merge(&heap_allocator, mem + padding, reserved - 2 * padding);
+    CAMLassert_aligned(mem, page_size);
+    CAMLassert_aligned(reserved, page_size);
+    CAMLassert_aligned(padding, page_size);
+    caml_pa_merge(page_allocator, mem + padding, reserved - 2 * padding);
     /* Now it should succeed */
-    if (!caml_pa_alloc(&heap_allocator, request, &block, &obtained))
+    if (!caml_pa_alloc(page_allocator, request, &block, &obtained))
       CAMLassert(0);
   }
   CAMLassert(block != NULL && obtained >= request);
-  CAMLassert_aligned(block, Huge_page_size);
-  CAMLassert_aligned(obtained, Huge_page_size);
+  CAMLassert_aligned(block, page_size);
+  CAMLassert_aligned(obtained, page_size);
   if (-1 == caml_mem_commit(block, obtained)) goto err;
   *out_block = block;
   *out_size = obtained;
   return 0;
 err:
-  caml_pa_merge(&heap_allocator, block, obtained);
+  caml_pa_merge(page_allocator, block, obtained);
   return -1;
 }
 
 void caml_heap_decommit(char * block, asize_t size)
 {
-  CAMLassert_aligned(block, Huge_page_size);
-  CAMLassert_aligned(size, Huge_page_size);
+  bool huge =
+    Is_aligned(block, Huge_page_size) && Is_aligned(size, Huge_page_size);
+  CAMLassert_aligned(block, Heap_page_size);
+  CAMLassert_aligned(size, Heap_page_size);
   caml_mem_decommit(block, size);
-  caml_pa_merge(&heap_allocator, block, size);
+  caml_pa_merge(huge ? &huge_allocator : &heap_allocator, block, size);
 }
