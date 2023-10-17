@@ -256,6 +256,7 @@ CAMLnoreturn_end;
 
 #define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
 #define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
+#define Is_aligned(n, mod) ((uintnat)(n) == Round_down((uintnat)(n), mod))
 
 #endif /* CAML_INTERNALS */
 
