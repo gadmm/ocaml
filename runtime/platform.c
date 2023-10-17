@@ -284,8 +284,8 @@ static int mem_commit_os(char *block, asize_t size)
   /* Huge pages on Linux */
   if (MADV_HUGEPAGE != UNDEFINED
       && caml_use_huge_pages
-      && (uintnat)block == Round_down((uintnat)block, Huge_page_size)
-      && (uintnat)size == Round_down((uintnat)size, Huge_page_size)) {
+      && Is_aligned(block, Huge_page_size)
+      && Is_aligned(size, Huge_page_size)) {
     /* Request huge pages (THP) if huge pages are enabled and the
        region is Huge-page-aligned. Note: this can cause large pauses
        if /sys/kernel/mm/transparent_hugepage/defrag is set to
