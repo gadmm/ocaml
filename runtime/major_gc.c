@@ -1194,10 +1194,14 @@ asize_t caml_clip_heap_chunk_wsz (asize_t wsz)
 {
   asize_t result = wsz;
   uintnat incr;
+  /* We count the header as part of the heap increment or heap chunk
+     minimum. This makes a difference since the granularity is coarse
+     (huge page size on most platforms). We need to round up. */
+  asize_t head_wsz = Wsize_bsize(sizeof(heap_chunk_head) + sizeof(value) - 1);
 
   /* Compute the heap increment as a word size. */
   if (caml_major_heap_increment > 1000){
-    incr = caml_major_heap_increment;
+    incr = caml_major_heap_increment - sizeof(heap_chunk_head);
   }else{
     incr = Caml_state->stat_heap_wsz / 100 * caml_major_heap_increment;
   }
@@ -1205,8 +1209,9 @@ asize_t caml_clip_heap_chunk_wsz (asize_t wsz)
   if (result < incr){
     result = incr;
   }
-  if (result < Heap_chunk_min){
-    result = Heap_chunk_min;
+  /* TODO: a bit ugly, find a better reorganization of the code */
+  if (result < Heap_chunk_min - head_wsz){
+    result = Heap_chunk_min - head_wsz;
   }
   return result;
 }
