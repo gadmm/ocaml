@@ -625,7 +625,8 @@ Caml_noinline static intnat do_some_marking
   struct mark_stack stk = *Caml_state->mark_stack;
 #ifndef NO_NAKED_POINTERS
   atomic_char *heap_table = caml_heap_table;
-#define Is_markable(v) caml_in_heap_cached(v, heap_table)
+#define Is_markable(v)                                                \
+  CAMLlikely(caml_classify_address(heap_table, (void *)v) & In_heap)
 #else
   uintnat young_start = (uintnat)(Val_hp(Caml_state->young_alloc_start));
   uintnat young_len = (uintnat)Caml_state->young_alloc_end - young_start;

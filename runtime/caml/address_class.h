@@ -83,11 +83,12 @@
 /* Use the following macros to test an address for the different classes
    it might belong to. */
 
-#define Is_young(val) \
-  (CAMLassert (Is_block (val)), \
-   (caml_classify_address((void*)a) & In_young))
+#define Classify_addr_as(val, class)                                  \
+  (CAMLassert(Is_block((value)(val))),                                \
+   caml_classify_address(caml_heap_table, (void*)(val)) & (class))
 
-#define Is_in_heap(a) (caml_classify_address((void*)a) & In_heap)
+#define Is_young(val) Classify_addr_as(val, In_young)
+#define Is_in_heap(val) Classify_addr_as(val, In_heap)
 
 #ifdef NO_NAKED_POINTERS
 
@@ -96,10 +97,8 @@
 
 #else
 
-#define Is_in_heap_or_young(a)                              \
-  (caml_classify_address((void*)a) & (In_heap | In_young))
-
-#define Is_in_value_area(a) \
+#define Is_in_heap_or_young(a) Classify_addr_as(a, In_heap | In_young)
+#define Is_in_value_area(a)                                             \
   (Is_in_heap_or_young(a) || caml_is_in_static_data((void *)(a)))
 
 #endif /* NO_NAKED_POINTERS */
@@ -135,36 +134,6 @@ typedef char atomic_char;
 #endif
 CAMLextern atomic_char *caml_heap_table;
 
-Caml_inline char caml_heap_table_get_sync(intnat p)
-{
-  char e = 0;
-#ifdef HAS_ATOMICS
-  if (atomic_compare_exchange_strong_explicit(&caml_heap_table[p], &e,
-                                              Unmanaged, memory_order_acq_rel,
-                                              memory_order_acquire)) {
-#else
-  if (e = caml_heap_table[p], e == 0) {
-    caml_heap_table[p] = Unmanaged;
-#endif
-    return Unmanaged;
-  } else {
-    // e != 0
-    return e;
-  }
-}
-
-Caml_inline int caml_classify_address(void *a)
-{
-  intnat p = Pagetable_entry(a);
-#ifdef HAS_ATOMICS
-  char e = atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
-#else
-  char e = caml_heap_table[p];
-#endif
-  if (CAMLlikely(e != 0)) return e;
-  return caml_heap_table_get_sync(p);
-}
-
 /*
   - We assume that synchronisation follows from ordering of control
     dependencies (Linux kernel memory model). See Paul E. McKenney, "Is
@@ -172,15 +141,15 @@ Caml_inline int caml_classify_address(void *a)
     Sections 15.2.5 & 15.3.3.
   - We do not "taint" pages containing out of heap pointers.
 */
-Caml_inline int caml_in_heap_cached(value v, atomic_char *heap_table)
+
+Caml_inline int caml_classify_address(atomic_char *heap_table, void *a)
 {
-  intnat p = Pagetable_entry(v);
+  intnat p = Pagetable_entry(a);
 #ifdef HAS_ATOMICS
-  char e = atomic_load_explicit(&heap_table[p], memory_order_relaxed);
+  return atomic_load_explicit(&caml_heap_table[p], memory_order_relaxed);
 #else
-  char e = heap_table[p];
+  return caml_heap_table[p];
 #endif
-  return CAMLlikely(e & In_heap);
 }
 
 int caml_is_in_static_data(void *a);
