@@ -310,7 +310,7 @@ static int mem_commit_os(char *block, asize_t size)
     }
   }
   /* Linux */
-  if (MADV_POPULATE_WRITE != UNDEFINED) {
+  if (MADV_POPULATE_WRITE != UNDEFINED && DO_POPULATE && caml_os_overcommit) {
     /* Populate all pages at once, and guarantee no SIGBUS with
        overcommitting. */
     if (-1 == madvise_os(block, size, MADV_POPULATE_WRITE)) {
