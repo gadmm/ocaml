@@ -58,6 +58,12 @@ CAMLextern uintnat caml_real_page_size;
 #define MMAP_GROWS_DOWN 0
 #endif
 
+/* On Linux with overcommitting, prefault pages to avoid SIGBUS in
+   out-of-memory situations. This is expensive. (Note: the program
+   still stops if the allocation failure happens during minor
+   collection.) */
+#define DO_POPULATE 1
+
 /* On Windows, reservations do not coalesce; one must be careful not
    to cross reservation boundaries with [caml_mem_commit_os] and
    [caml_mem_decommit_os]. */
