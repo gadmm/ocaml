@@ -62,7 +62,7 @@ CAMLextern uintnat caml_real_page_size;
    out-of-memory situations. This is expensive. (Note: the program
    still stops if the allocation failure happens during minor
    collection.) */
-#define DO_POPULATE 1
+#define DO_POPULATE 0
 
 /* On Windows, reservations do not coalesce; one must be careful not
    to cross reservation boundaries with [caml_mem_commit_os] and

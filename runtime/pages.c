@@ -24,7 +24,7 @@
 #include "caml/platform.h"
 #include "caml/skiplist.h"
 
-uintnat caml_use_huge_pages = 0;
+uintnat caml_use_huge_pages = 1;
 /* True iff the program wants to allocate heap chunks by mmapping huge
    pages. This is set when parsing [OCAMLRUNPARAM] and must stay
    constant after that.
