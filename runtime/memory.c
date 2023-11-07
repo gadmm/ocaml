@@ -402,28 +402,33 @@ CAMLexport CAMLweakdef void caml_modify (value *fp, value val)
      below changes!
   */
   value old;
-
-  if (Is_young((value)fp)) {
+  atomic_char *heap_table = caml_heap_table;
+  int fp_class = caml_classify_address(heap_table, fp);
+  if (fp_class & In_young) {
     /* The modified object resides in the minor heap.
        Conditions 1 and 2 cannot occur. */
     *fp = val;
   } else {
     /* The modified object resides in the major heap. */
-    CAMLassert(Is_in_heap(fp));
+    CAMLassert(fp_class & In_heap);
     old = *fp;
     *fp = val;
+    /* Check for condition 1. */
+    if (Is_block(val) &&
+        caml_classify_address(heap_table, (void *)val) & In_young) {
+      add_to_ref_table (Caml_state->ref_table, fp);
+    }
     if (Is_block(old)) {
+      int old_class = caml_classify_address(heap_table, (void *)old);
       /* If [old] is a pointer within the minor heap, we already
          have a major->minor pointer and [fp] is already in the
          remembered set.  Conditions 1 and 2 cannot occur. */
-      if (Is_young(old)) return;
+      if (old_class & In_young) return;
       /* Here, [old] can be a pointer within the major heap.
          Check for condition 2. */
-      if (caml_gc_phase == Phase_mark) caml_darken(old, NULL);
-    }
-    /* Check for condition 1. */
-    if (Is_block(val) && Is_young(val)) {
-      add_to_ref_table (Caml_state->ref_table, fp);
+      if (old_class & In_heap && caml_gc_phase == Phase_mark) {
+          caml_darken_heap_block(old);
+      }
     }
   }
 }

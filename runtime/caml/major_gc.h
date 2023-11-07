@@ -90,6 +90,7 @@ CAMLextern void (*caml_major_gc_hook)(void);
 
 void caml_init_major_heap (asize_t);           /* size in bytes */
 asize_t caml_clip_heap_chunk_wsz (asize_t wsz);
+void caml_darken_heap_block(value);
 void caml_darken (value, value *);
 void caml_major_collection_slice (intnat);
 void caml_shrink_mark_stack (void);

@@ -521,6 +521,7 @@ CAMLprim value caml_array_fill(value array,
   intnat ofs = Long_val(v_ofs);
   intnat len = Long_val(v_len);
   value* fp;
+  atomic_char *heap_table = caml_heap_table;
 
   /* This duplicates the logic of caml_modify.  Please refer to the
      implementation of that function for a description of GC
@@ -535,18 +536,23 @@ CAMLprim value caml_array_fill(value array,
   }
 #endif
   fp = &Field(array, ofs);
-  if (Is_young(array)) {
+  if (caml_classify_address(heap_table, (void *)array) & In_young) {
     for (; len > 0; len--, fp++) *fp = val;
   } else {
-    int is_val_young_block = Is_block(val) && Is_young(val);
+    int is_val_young_block =
+      Is_block(val) &&
+      caml_classify_address(heap_table, (void *)val) & In_young;
     CAMLassert(Is_in_heap(fp));
     for (; len > 0; len--, fp++) {
       value old = *fp;
       if (old == val) continue;
       *fp = val;
       if (Is_block(old)) {
-        if (Is_young(old)) continue;
-        if (caml_gc_phase == Phase_mark) caml_darken(old, NULL);
+        int old_class = caml_classify_address(heap_table, (void *)old);
+        if (old_class & In_young) continue;
+        if (old_class & In_heap && caml_gc_phase == Phase_mark) {
+            caml_darken_heap_block(old);
+        }
       }
       if (is_val_young_block)
         add_to_ref_table (Caml_state->ref_table, fp);

@@ -274,6 +274,32 @@ Caml_inline void mark_stack_push(struct mark_stack* stk, value block,
 static void is_naked_pointer_safe (value v, value *p);
 #endif
 
+void caml_darken_heap_block(value v)
+{
+  header_t h = Hd_val(v);
+  tag_t t = Tag_hd(h);
+  if (t == Infix_tag){
+    v -= Infix_offset_val(v);
+    h = Hd_val(v);
+    t = Tag_hd(h);
+  }
+#ifdef NO_NAKED_POINTERS
+  /* We insist that naked pointers to outside the heap point to things that
+     look like values with headers coloured black.  This is always
+     strictly necessary because the compactor relies on it. */
+  CAMLassert (Is_in_heap (v) || Is_black_hd (h));
+#endif
+  CAMLassert (!Is_blue_hd (h));
+  if (Is_white_hd(h)){
+    caml_ephe_list_pure = 0;
+    Hd_val (v) = Blackhd_hd (h);
+    marked_words += Whsize_hd (h);
+    if (t < No_scan_tag){
+      mark_stack_push(Caml_state->mark_stack, v, 0, NULL);
+    }
+  }
+}
+
 void caml_darken (value v, value *p)
 {
 #ifdef NO_NAKED_POINTERS
@@ -281,28 +307,7 @@ void caml_darken (value v, value *p)
 #else
   if (Is_block(v) && Is_in_heap (v)) {
 #endif
-    header_t h = Hd_val (v);
-    tag_t t = Tag_hd (h);
-    if (t == Infix_tag){
-      v -= Infix_offset_val(v);
-      h = Hd_val (v);
-      t = Tag_hd (h);
-    }
-#ifdef NO_NAKED_POINTERS
-    /* We insist that naked pointers to outside the heap point to things that
-       look like values with headers coloured black.  This is always
-       strictly necessary because the compactor relies on it. */
-    CAMLassert (Is_in_heap (v) || Is_black_hd (h));
-#endif
-    CAMLassert (!Is_blue_hd (h));
-    if (Is_white_hd (h)){
-      caml_ephe_list_pure = 0;
-      Hd_val (v) = Blackhd_hd (h);
-      marked_words += Whsize_hd (h);
-      if (t < No_scan_tag){
-        mark_stack_push(Caml_state->mark_stack, v, 0, NULL);
-      }
-    }
+    caml_darken_heap_block(v);
   }
 #if defined(NAKED_POINTERS_CHECKER) && defined(NATIVE_CODE)
   else if (Is_block(v) && !Is_young(v)) {
