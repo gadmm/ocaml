@@ -82,8 +82,8 @@ int caml_heap_commit(asize_t request, char **out_block, asize_t *out_size)
   asize_t obtained;
 
   /* Allocate a huge-aligned region if the request is almost huge. If
-     [caml_use_huge_pages] is true, this will result in the allocation
-     of a huge page. */
+     [caml_use_huge_pages] is true, or e.g. THP is always enabled,
+     this will result in the allocation of huge pages. */
   bool huge = request > Huge_page_size / 2;
   page_allocator *page_allocator = huge ? &huge_allocator : &heap_allocator;
   asize_t page_size = huge ? Huge_page_size : Heap_page_size;
