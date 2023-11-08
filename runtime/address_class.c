@@ -29,7 +29,7 @@
 atomic_char *caml_heap_table = NULL;
 
 #ifdef ARCH_SIXTYFOUR
-#  if !defined(NO_NAKED_POINTER) || defined(DEBUG)
+#  if !defined(NO_NAKED_POINTERS) || defined(DEBUG)
 /* Determines area committed up-front for the page table. It should
    remain at most 49 bits even on 57-bit address spaces as this is
    all that is needed for backwards-compatibility (in the same way we
