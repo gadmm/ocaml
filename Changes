@@ -165,6 +165,9 @@ _______________
    review by KC Sivaramakrishnan, Miod Vallat and Nicolás Ojeda Bär,
    report by Vesa Karvonen)
 
+- ?: Add `Mutex.try_protect : Mutex.t -> (unit -> 'a) -> 'a option`.
+  (Guillaume Munch-Maccagnoni, review by)
+
 * #13240: Add Uchar.seeded_hash, Change Uchar.hash implementation.
   Previously, Uchar.hash was aliased to Uchar.to_int. If you need that behavior,
   change your module instantiation from eg `module HT = Hashtbl.Make(Uchar)` to

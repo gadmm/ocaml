@@ -48,7 +48,9 @@ val try_lock : t -> bool
 (** Same as {!Mutex.lock}, but does not suspend the calling thread if
    the mutex is already locked: just return [false] immediately
    in that case. If the mutex is unlocked, lock it and
-   return [true]. *)
+   return [true].
+
+   See also {!try_protect} to correctly deal with exceptions. *)
 
 val unlock : t -> unit
 (** Unlock the given mutex. Other threads suspended trying to lock
@@ -60,12 +62,25 @@ val unlock : t -> unit
    or when unlocking a mutex from a different thread. *)
 
 val protect : t -> (unit -> 'a) -> 'a
-(** [protect mutex f] runs [f()] in a critical section where [mutex]
+(** [protect mutex f] runs [f ()] in a critical section where [mutex]
     is locked (using {!lock}); it then takes care of releasing [mutex],
-    whether [f()] returned a value or raised an exception.
+    whether [f ()] returned a value or raised an exception.
 
-    The unlocking operation is guaranteed to always takes place,
-    even in the event an asynchronous exception (e.g. {!Sys.Break}) is raised
-    in some signal handler.
+    The mutex is guaranteed to be unlocked upon return, even in the
+    event an asynchronous exception being raised at any point (e.g.
+    {!Sys.Break}).
 
     @since 5.1 *)
+
+val try_protect : t -> (unit -> 'a) -> 'a option
+(** [try_protect mutex f] runs [Some (f ())] in a critical section
+    where [mutex] is locked using {!try_lock}; it then takes care of
+    releasing [mutex], whether [f ()] returned a value or raised an
+    exception. If the call to [try_lock] failed, then [None] is
+    returned.
+
+    The mutex is guaranteed to be unlocked upon return, even in the
+    event an asynchronous exception being raised at any point (e.g.
+    {!Sys.Break}).
+
+    @since 5.3 *)

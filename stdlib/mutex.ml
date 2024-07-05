@@ -22,13 +22,26 @@ external unlock: t -> unit = "caml_ml_mutex_unlock"
 (* private re-export *)
 external reraise : exn -> 'a = "%reraise"
 
-(* cannot inline, otherwise flambda might move code around. *)
+(* The following functions are carefully written to be correct wrt.
+   asynchronous exceptions, by reasoning about polling points present
+   in the code.
+
+   - We use [@inline never] to prevent flambda from moving a safepoint
+     from the surrounding code to the wrong place.
+
+   - [unlock] being an external, this function call does not poll in
+     bytecode. *)
+
 let[@inline never] protect m f =
   lock m;
   match f() with
-  | x ->
-    unlock m; x
-  | exception e ->
-    (* NOTE: [unlock] does not poll for asynchronous exceptions *)
-    unlock m;
-    reraise e
+  | x -> unlock m; x
+  | exception e -> unlock m; reraise e
+
+let[@inline never] try_protect m f =
+  if try_lock m then
+    match f () with
+    | x -> unlock m; Some x
+    | exception e -> unlock m; reraise e
+  else
+    None
