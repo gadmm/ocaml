@@ -90,9 +90,13 @@ Caml_inline void cpu_relax(void) {
    The domain lock must be held in order to call
    [caml_plat_lock_non_blocking].
 
+   Custom block finalisers must never use
+   [caml_plat_lock_non_blocking].
+
    It is possible to combine calls to [caml_plat_lock_non_blocking] on
    a mutex from the mutator with calls to [caml_plat_lock_blocking] on
-   the same mutex from a STW section.
+   the same mutex from a STW section (but not from a custom block
+   finaliser).
 
    These functions never raise exceptions; errors are fatal. Thus, for
    usages where bugs are susceptible to be introduced by users, the
