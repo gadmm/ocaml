@@ -88,6 +88,9 @@ struct caml_intern_state {
   /* Writing pointer in destination block. Only used when the object fits in
      the minor heap. */
 
+  void * intern_stat_block;
+  /* The static block allocated for out-of-heap unmarshaling */
+
   char compressed;
   /* 1 if the compressed format is in use, 0 otherwise */
 };
@@ -114,6 +117,7 @@ static struct caml_intern_state* init_intern_state (void)
   s->obj_counter = 0;
   s->intern_obj_table = NULL;
   s->intern_dest = NULL;
+  s->intern_stat_block = NULL;
   init_intern_stack(s);
 
   Caml_state->intern_state = s;
@@ -255,6 +259,10 @@ static void intern_cleanup(struct caml_intern_state* s)
     caml_stat_free(s->intern_obj_table);
     s->intern_obj_table = NULL;
   }
+  if (s->intern_stat_block != NULL) {
+    caml_stat_free(s->intern_stat_block);
+    s->intern_stat_block = NULL;
+  }
   s->intern_dest = NULL;
   /* free the recursion stack */
   intern_free_stack(s);
@@ -384,38 +392,44 @@ static struct intern_item * intern_resize_stack(struct caml_intern_state* s,
   } while(0)
 
 static void intern_alloc_storage(struct caml_intern_state* s, mlsize_t whsize,
-                                 mlsize_t num_objects)
+                                 mlsize_t num_objects, bool out_of_heap)
 {
-  mlsize_t wosize;
-  value v;
-
   if (whsize == 0) {
     CAMLassert (s->intern_obj_table == NULL);
     return;
   }
-  wosize = Wosize_whsize(whsize);
 
-  if (wosize <= Max_young_wosize && wosize != 0) {
-    /* don't track bulk allocation in minor heap with statmemprof;
-     * individual block allocations are tracked instead */
-    Alloc_small(v, wosize, String_tag, Alloc_small_enter_GC_no_track);
-    s->intern_dest = (header_t *) Hp_val(v);
+  if (out_of_heap) {
+    void *block = caml_stat_alloc_noexc(whsize * sizeof(value));
+    if (block == NULL) goto oom;
+    s->intern_stat_block = block;
+    s->intern_dest = (header_t *) block;
   } else {
-    CAMLassert (s->intern_dest == NULL);
+    mlsize_t wosize = Wosize_whsize(whsize);
+    if (wosize <= Max_young_wosize && wosize != 0) {
+      value v;
+      /* don't track bulk allocation in minor heap with statmemprof;
+       * individual block allocations are tracked instead */
+      Alloc_small(v, wosize, String_tag, Alloc_small_enter_GC_no_track);
+      s->intern_dest = (header_t *) Hp_val(v);
+    } else {
+      /* allocate on the major heap */
+      CAMLassert (s->intern_dest == NULL);
+      CAMLassert (s->intern_stat_block == NULL);
+    }
   }
   s->obj_counter = 0;
   if (num_objects > 0) {
     s->intern_obj_table =
       (value *) caml_stat_alloc_noexc(num_objects * sizeof(value));
-    if (s->intern_obj_table == NULL) {
-      intern_cleanup(s);
-      caml_raise_out_of_memory();
-    }
+    if (s->intern_obj_table == NULL) goto oom;
   } else {
     CAMLassert(s->intern_obj_table == NULL);
   }
-
   return;
+oom:
+  intern_cleanup(s);
+  caml_raise_out_of_memory();
 }
 
 static value intern_alloc_obj(struct caml_intern_state* s, caml_domain_state* d,
@@ -424,12 +438,17 @@ static value intern_alloc_obj(struct caml_intern_state* s, caml_domain_state* d,
   void* p;
 
   if (s->intern_dest) {
-    CAMLassert ((value*)s->intern_dest >= d->young_start &&
-                (value*)s->intern_dest < d->young_end);
     p = s->intern_dest;
-    *s->intern_dest = Make_header (wosize, tag, 0);
-    caml_memprof_sample_block(Val_hp(p), wosize, 1 + wosize,
-                              CAML_MEMPROF_SRC_MARSHAL);
+
+    if (s->intern_stat_block != NULL) {
+      *s->intern_dest = Caml_out_of_heap_header(wosize, tag);
+    } else {
+      CAMLassert ((value*)s->intern_dest >= d->young_start &&
+                  (value*)s->intern_dest < d->young_end);
+      *s->intern_dest = Make_header (wosize, tag, 0);
+      caml_memprof_sample_block(Val_hp(p), wosize, 1 + wosize,
+                                CAML_MEMPROF_SRC_MARSHAL);
+    }
     s->intern_dest += 1 + wosize;
   } else {
     p = caml_shared_try_alloc(d->shared_heap, wosize, tag,
@@ -716,7 +735,8 @@ static void intern_rec(struct caml_intern_state* s,
   /* The following direct-assignment to [*dest] rather than [caml_modify] is
      safe since either it is the case that
 
-       1. [dest] points within the minor heap of the current domain or
+       1. [dest] points within the minor heap of the current domain or a
+          static memory block, or
        2. [dest] is a freshly-allocated major heap block, but not yet visible
           to the GC, and if [v] is a block, then it is also in the major heap.
           So no major to minor heap references are created.
@@ -735,6 +755,9 @@ static void intern_rec(struct caml_intern_state* s,
 static value intern_end(struct caml_intern_state* s, value res)
 {
   CAMLparam1(res);
+  /* Success: release ownership of the static block if any, so that it
+     lives for as long as the runtime */
+  s->intern_stat_block = NULL;
   /* Free everything */
   intern_cleanup(s);
 
@@ -856,7 +879,7 @@ static void intern_decompress_input(struct caml_intern_state * s,
 
 /* Reading from a channel */
 
-value caml_input_val(struct channel *chan)
+static value input_val_gen(struct channel *chan, bool out_of_heap)
 {
   intnat r;
   char header[MAX_INTEXT_HEADER_SIZE];
@@ -906,30 +929,39 @@ value caml_input_val(struct channel *chan)
   /* Initialize global state */
   intern_init(s, block, block);
   intern_decompress_input(s, "input_value", &h);
-  intern_alloc_storage(s, h.whsize, h.num_objects);
+  intern_alloc_storage(s, h.whsize, h.num_objects, out_of_heap);
   /* Fill it in */
   intern_rec(s, "input_value", &res);
   return intern_end(s, res);
 }
 
-CAMLprim value caml_input_value(value vchan)
+value caml_input_val(struct channel *chan)
+{
+  return input_val_gen(chan, false);
+}
+
+static value input_value_gen(value vchan, bool out_of_heap)
 {
   CAMLparam1 (vchan);
   struct channel * chan = Channel(vchan);
   CAMLlocal1 (res);
 
   caml_channel_lock(chan);
-  res = caml_input_val(chan);
+  res = input_val_gen(chan, out_of_heap);
   caml_channel_unlock(chan);
   CAMLreturn (res);
 }
 
+CAMLprim value caml_input_value(value vchan)
+{
+  return input_value_gen(vchan, false);
+}
+
 /* Reading from memory-resident blocks */
 
-/* XXX KC: Unused primitive. Remove with bootstrap. */
 CAMLprim value caml_input_value_to_outside_heap(value vchan)
 {
-  return caml_input_value(vchan);
+  return input_value_gen(vchan, true);
 }
 
 CAMLexport value caml_input_val_from_bytes(value str, intnat ofs)
@@ -945,7 +977,7 @@ CAMLexport value caml_input_val_from_bytes(value str, intnat ofs)
   if (ofs + h.header_len + h.data_len > caml_string_length(str))
     caml_failwith("input_val_from_string: bad length");
   /* Allocate result */
-  intern_alloc_storage(s, h.whsize, h.num_objects);
+  intern_alloc_storage(s, h.whsize, h.num_objects, false);
   s->intern_src = &Byte_u(str, ofs + h.header_len); /* If a GC occurred */
   /* Decompress if needed */
   intern_decompress_input(s, "input_val_from_string", &h);
@@ -966,7 +998,7 @@ static value input_val_from_block(struct caml_intern_state* s,
   /* Decompress if needed */
   intern_decompress_input(s, "input_val_from_block", h);
   /* Allocate result */
-  intern_alloc_storage(s, h->whsize, h->num_objects);
+  intern_alloc_storage(s, h->whsize, h->num_objects, false);
   /* Fill it in */
   intern_rec(s, "input_val_from_block", &obj);
   return (intern_end(s, obj));

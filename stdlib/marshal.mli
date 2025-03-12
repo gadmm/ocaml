@@ -146,6 +146,22 @@ val from_channel : in_channel -> 'a
    @raise Failure if the end of the file is reached during
    unmarshalling itself or if [chan] is not in binary mode.*)
 
+val static_from_channel : in_channel -> 'a
+(** [Marshal.static_from_channel chan] unmarshals a structured value
+   like {!Marshal.from_channel} does, except that the value is
+   allocated as static data and not considered for garbage collection.
+   Values allocated in this way must not be mutated, apart from fields
+   with an immediate type. The programmer should ensure this by giving
+   the result a type that forbids such mutations. This restriction
+   extends to lazy types in the case of data created using the
+   [Marshal.Closures] flag, so that no lazy value allocated statically
+   is ever forced.
+
+   @raise End_of_file if [chan] is already at the end of the file.
+
+   @raise Failure if the end of the file is reached during
+   unmarshalling itself or if [chan] is not in binary mode.*)
+
 val from_bytes : bytes -> int -> 'a
 (** [Marshal.from_bytes buff ofs] unmarshals a structured value
    like {!Marshal.from_channel} does, except that the byte
