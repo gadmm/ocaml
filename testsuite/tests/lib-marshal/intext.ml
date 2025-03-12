@@ -80,7 +80,8 @@ let test n b =
   if b then print_string " passed.\n" else print_string " FAILED.\n";
   flush stderr
 
-let test_in filename =
+let test_in ?(static = false) filename =
+  let input_value = Marshal.(if static then static_from_channel else from_channel) in
   let ic = open_in_bin filename in
   test 1 (input_value ic = 1);
   test 2 (input_value ic = (-1));
@@ -616,6 +617,8 @@ let main() =
     test_out "intext.data"; test_in "intext.data";
     print_string "Default flags (again)\n";
     test_out "intext.data"; test_in "intext.data";
+    print_string "Marshal.static_from_channel\n";
+    test_out "intext.data"; test_in ~static:true "intext.data";
     print_string "Marshal.to_string\n";
     test_string();
     print_string "Marshal.to_buffer\n";
@@ -644,7 +647,7 @@ let main() =
   if Sys.argv.(1) = "test" then begin
     let n = int_of_string Sys.argv.(2) in
     let ic = open_in_bin "intext.data" in
-    let b = (input_value ic : t) in
+    let b = (Marshal.from_channel ic : t) in
     Gc.full_major();
     close_in ic;
     counter := 0;

@@ -42,6 +42,8 @@ let to_buffer buff ofs len v flags =
 *)
 
 external from_channel: in_channel -> 'a = "caml_input_value"
+external static_from_channel: in_channel -> 'a =
+  "caml_input_value_to_outside_heap"
 external from_bytes_unsafe: bytes -> int -> 'a = "caml_input_value_from_bytes"
 external data_size_unsafe: bytes -> int -> int = "caml_marshal_data_size"
 
