@@ -432,15 +432,20 @@ oom:
   caml_raise_out_of_memory();
 }
 
-static value intern_alloc_obj(struct caml_intern_state* s, caml_domain_state* d,
-                              mlsize_t wosize, tag_t tag)
+typedef enum { MAJOR, MINOR, STATIC } alloc_type;
+
+__attribute__((always_inline))
+static inline value intern_alloc_obj(struct caml_intern_state* s,
+                                     caml_domain_state* d,
+                                     mlsize_t wosize, tag_t tag,
+                                     const alloc_type alloc_type)
 {
   void* p;
 
-  if (s->intern_dest) {
+  if (alloc_type != MAJOR) {
     p = s->intern_dest;
 
-    if (s->intern_stat_block != NULL) {
+    if (alloc_type == STATIC) {
       *s->intern_dest = Caml_out_of_heap_header(wosize, tag);
     } else {
       CAMLassert ((value*)s->intern_dest >= d->young_start &&
@@ -467,9 +472,11 @@ static value intern_alloc_obj(struct caml_intern_state* s, caml_domain_state* d,
   return Val_hp(p);
 }
 
-static void intern_rec(struct caml_intern_state* s,
-                       const char * fun_name,
-                       volatile value *dest)
+__attribute__((always_inline))
+static inline void intern_rec_gen(struct caml_intern_state* s,
+                                  const char * fun_name,
+                                  volatile value *dest,
+                                  const alloc_type alloc_type)
 {
   unsigned int code;
   tag_t tag;
@@ -523,7 +530,7 @@ static void intern_rec(struct caml_intern_state* s,
       if (size == 0) {
         v = Atom(tag);
       } else {
-        v = intern_alloc_obj (s, d, size, tag);
+        v = intern_alloc_obj (s, d, size, tag, alloc_type);
         if (s->intern_obj_table != NULL)
           s->intern_obj_table[s->obj_counter++] = v;
         /* For objects, we need to freshen the oid */
@@ -552,7 +559,7 @@ static void intern_rec(struct caml_intern_state* s,
       len = (code & 0x1F);
     read_string:
       size = (len + sizeof(value)) / sizeof(value);
-      v = intern_alloc_obj (s, d, size, String_tag);
+      v = intern_alloc_obj (s, d, size, String_tag, alloc_type);
       if (s->intern_obj_table != NULL)
         s->intern_obj_table[s->obj_counter++] = v;
       Field(v, size - 1) = 0;
@@ -623,7 +630,7 @@ static void intern_rec(struct caml_intern_state* s,
 #endif
       case CODE_DOUBLE_LITTLE:
       case CODE_DOUBLE_BIG:
-        v = intern_alloc_obj (s, d, Double_wosize, Double_tag);
+        v = intern_alloc_obj (s, d, Double_wosize, Double_tag, alloc_type);
         if (s->intern_obj_table != NULL)
           s->intern_obj_table[s->obj_counter++] = v;
         readfloat(s, (double *) v, code);
@@ -633,7 +640,7 @@ static void intern_rec(struct caml_intern_state* s,
         len = read8u(s);
       read_double_array:
         size = len * Double_wosize;
-        v = intern_alloc_obj (s, d, size, Double_array_tag);
+        v = intern_alloc_obj (s, d, size, Double_array_tag, alloc_type);
         if (s->intern_obj_table != NULL)
           s->intern_obj_table[s->obj_counter++] = v;
         readfloats(s, (double *) v, len, code);
@@ -710,7 +717,7 @@ static void intern_rec(struct caml_intern_state* s,
         }
 #endif
         temp_size = 1 + (expected_size + sizeof(value) - 1) / sizeof(value);
-        v = intern_alloc_obj(s, d, temp_size, Custom_tag);
+        v = intern_alloc_obj(s, d, temp_size, Custom_tag, alloc_type);
         Custom_ops_val(v) = ops;
         size = ops->deserialize(Data_custom_val(v));
         if (size != expected_size) {
@@ -751,6 +758,51 @@ static void intern_rec(struct caml_intern_state* s,
   /* We are done. Cleanup the stack and leave the function */
   intern_free_stack(s);
 }
+
+/* Duplication for easy codegen inspection */
+
+#if defined(__GNUC__)
+#define Noinline __attribute__((noinline))
+#elif defined(_MSC_VER)
+#define Noinline __declspec(noinline)
+#else
+#define Noinline
+#endif
+
+Noinline void intern_rec_major(struct caml_intern_state* s,
+                                      const char * fun_name,
+                                      volatile value *dest)
+{
+  intern_rec_gen(s, fun_name, dest, MAJOR);
+}
+
+Noinline void intern_rec_minor(struct caml_intern_state* s,
+                                      const char * fun_name,
+                                      volatile value *dest)
+{
+  intern_rec_gen(s, fun_name, dest, MINOR);
+}
+
+Noinline void intern_rec_static(struct caml_intern_state* s,
+                                      const char * fun_name,
+                                      volatile value *dest)
+{
+  intern_rec_gen(s, fun_name, dest, STATIC);
+}
+
+static void intern_rec(struct caml_intern_state* s,
+                       const char * fun_name,
+                       volatile value *dest)
+{
+  if (s->intern_dest == NULL) {
+    intern_rec_major(s, fun_name, dest);
+  } else if (s->intern_stat_block == NULL) {
+    intern_rec_minor(s, fun_name, dest);
+  } else {
+    intern_rec_static(s, fun_name, dest);
+  }
+}
+
 
 static value intern_end(struct caml_intern_state* s, value res)
 {
