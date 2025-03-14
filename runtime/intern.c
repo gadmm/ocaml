@@ -21,6 +21,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include "caml/alloc.h"
 #include "caml/callback.h"
 #include "caml/codefrag.h"
@@ -34,6 +35,7 @@
 #include "caml/memprof.h"
 #include "caml/mlvalues.h"
 #include "caml/misc.h"
+#include "caml/pages.h"
 #include "caml/reverse.h"
 #include "caml/signals.h"
 
@@ -600,7 +602,8 @@ static void intern_rec(value *dest)
   intern_free_stack();
 }
 
-static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
+static void intern_alloc(mlsize_t whsize, mlsize_t num_objects,
+                         bool out_of_heap)
 {
   mlsize_t wosize;
 
@@ -610,13 +613,17 @@ static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
     return;
   }
   wosize = Wosize_whsize(whsize);
-  if (wosize > Max_wosize) {
+  if (out_of_heap) {
+    void *block = caml_static_data_alloc(whsize);
+    if (block == NULL) goto oom;
+    intern_dest = (header_t *) block;
+    intern_block = 0;
+    intern_color = Caml_black; /* whatever */
+    intern_header = 0;
+  } else if (wosize > Max_wosize) {
     asize_t request = Bsize_wsize(whsize);
     intern_extra_block = caml_alloc_for_heap(request);
-    if (intern_extra_block == NULL) {
-      intern_cleanup();
-      caml_raise_out_of_memory();
-    }
+    if (intern_extra_block == NULL) goto oom;
     intern_color = caml_allocation_color(intern_extra_block);
     intern_dest = (header_t *) intern_extra_block;
     CAMLassert (intern_block == 0);
@@ -636,10 +643,7 @@ static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
       intern_block = caml_alloc_shr_no_track_noexc (wosize, String_tag);
       /* do not do the urgent_gc check here because it might darken
          intern_block into gray and break the intern_color assertion below */
-      if (intern_block == 0) {
-        intern_cleanup();
-        caml_raise_out_of_memory();
-      }
+      if (intern_block == 0) goto oom;
     }
     intern_header = Hd_val(intern_block);
     intern_color = Color_hd(intern_header);
@@ -651,12 +655,13 @@ static void intern_alloc(mlsize_t whsize, mlsize_t num_objects)
   if (num_objects > 0) {
     intern_obj_table =
       (value *) caml_stat_alloc_noexc(num_objects * sizeof(value));
-    if (intern_obj_table == NULL) {
-      intern_cleanup();
-      caml_raise_out_of_memory();
-    }
+    if (intern_obj_table == NULL) goto oom;
   } else
     CAMLassert(intern_obj_table == NULL);
+  return;
+ oom:
+  intern_cleanup();
+  caml_raise_out_of_memory();
 }
 
 static header_t* intern_add_to_heap(mlsize_t whsize)
@@ -764,7 +769,7 @@ static void caml_parse_header(char * fun_name,
 
 /* Reading from a channel */
 
-value caml_input_val(struct channel *chan)
+value caml_input_val_gen(struct channel *chan, bool out_of_heap)
 {
   intnat r;
   char header[32];
@@ -800,22 +805,37 @@ value caml_input_val(struct channel *chan)
   }
   /* Initialize global state */
   intern_init(block, block);
-  intern_alloc(h.whsize, h.num_objects);
+  intern_alloc(h.whsize, h.num_objects, out_of_heap);
   /* Fill it in */
   intern_rec(&res);
   return intern_end(res, h.whsize);
 }
 
-CAMLprim value caml_input_value(value vchan)
+value caml_input_val(struct channel *chan)
+{
+  return caml_input_val_gen(chan, false);
+}
+
+value caml_input_value_gen(value vchan, bool out_of_heap)
 {
   CAMLparam1 (vchan);
   struct channel * chan = Channel(vchan);
   CAMLlocal1 (res);
 
   Lock(chan);
-  res = caml_input_val(chan);
+  res = caml_input_val_gen(chan, out_of_heap);
   Unlock(chan);
   CAMLreturn (res);
+}
+
+CAMLprim value caml_input_value(value vchan)
+{
+  return caml_input_value_gen(vchan, false);
+}
+
+CAMLprim value caml_input_value_to_outside_heap(value vchan)
+{
+  return caml_input_value_gen(vchan, true);
 }
 
 /* Reading from memory-resident blocks */
@@ -832,7 +852,7 @@ CAMLexport value caml_input_val_from_bytes(value str, intnat ofs)
   if (ofs + h.header_len + h.data_len > caml_string_length(str))
     caml_failwith("input_val_from_string: bad length");
   /* Allocate result */
-  intern_alloc(h.whsize, h.num_objects);
+  intern_alloc(h.whsize, h.num_objects, false);
   intern_src = &Byte_u(str, ofs + h.header_len); /* If a GC occurred */
   /* Fill it in */
   intern_rec(&obj);
@@ -848,7 +868,7 @@ static value input_val_from_block(struct marshal_header * h)
 {
   value obj;
   /* Allocate result */
-  intern_alloc(h->whsize, h->num_objects);
+  intern_alloc(h->whsize, h->num_objects, false);
   /* Fill it in */
   intern_rec(&obj);
   return (intern_end(obj, h->whsize));

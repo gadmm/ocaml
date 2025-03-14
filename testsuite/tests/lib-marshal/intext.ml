@@ -77,7 +77,8 @@ let test n b =
   if b then print_string " passed.\n" else print_string " FAILED.\n";
   flush stderr
 
-let test_in filename =
+let test_in ?(static = false) filename =
+  let input_value = Marshal.(if static then static_from_channel else from_channel) in
   let ic = open_in_bin filename in
   test 1 (input_value ic = 1);
   test 2 (input_value ic = (-1));
@@ -593,6 +594,7 @@ let main() =
   if Array.length Sys.argv <= 2 then begin
     test_out "intext.data"; test_in "intext.data";
     test_out "intext.data"; test_in "intext.data";
+    test_out "intext.data"; test_in ~static:true "intext.data";
     test_string();
     test_buffer();
     test_size();

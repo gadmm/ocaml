@@ -145,6 +145,8 @@ val from_channel : in_channel -> 'a
    @raise Failure if the end of the file is reached during
    unmarshalling itself or if [chan] is not in binary mode.*)
 
+val static_from_channel : in_channel -> 'a
+
 val from_bytes : bytes -> int -> 'a
 (** [Marshal.from_bytes buff ofs] unmarshals a structured value
    like {!Marshal.from_channel} does, except that the byte
