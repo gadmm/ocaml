@@ -44,7 +44,15 @@
 extern "C" {
 #endif
 
-/* A best-fit allocator for memory ranges aligned to a big power of 2. */
+/* A best-fit allocator for memory ranges aligned to a big power of 2.
+   page_log is the log_2 of the granularity and alignment of the allocations.
+
+   It can serve requests up to a size of 2^N where:
+    - N = 16+2*page_log on x86-64 (Page_log: 1TB, Heap_page_log: 1PB)
+    - N = 15+2*page_log on arm64 (Page_log: 512GB, Heap_page_log: 512TB)
+    - N = 2*page_log on x86 (32-bit) (Page_log: 16MB, Heap_page_log: 16GB)
+   So be careful about a page_log much smaller than Page_log!
+ */
 
 typedef struct {
   /* size of pages managed, typically Huge_page_log or Page_log */
@@ -66,8 +74,10 @@ typedef struct {
   { page_log, SKIPLIST_STATIC_INITIALIZER, SKIPLIST_STATIC_INITIALIZER }
 
 /* Allocate a block of size [request] out of the free blocks of [pa].
-   [request] is rounded up to the size of pages managed by [pa].
-   Returns 1 on success, 0 if out of free space. */
+   [request] is rounded up to the size of pages managed by [pa]. The
+   result of the allocation is stored in [block_out]. [size_out] can
+   be NULL, if not, it receives the actual allocated size. Returns 1
+   on success, 0 if out of free space or if the request is too large. */
 int caml_pa_alloc(page_allocator *pa, asize_t request,
                   char **block_out, asize_t *size_out);
 

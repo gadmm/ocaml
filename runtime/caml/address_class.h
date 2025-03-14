@@ -154,10 +154,11 @@ Caml_inline int caml_classify_address(atomic_char *heap_table, void *a)
 
 int caml_is_in_static_data(void *a);
 
-int caml_page_table_add(int kind, void * start, void * end);
-int caml_page_table_add_static_data(void * start, void * end);
+int caml_page_table_add(int kind, void *start, void *end);
+int caml_page_table_add_static_data(void *start, void *end);
 
 #ifdef CAML_INTERNALS
+void caml_static_area_add(void *start, void *end);
 int caml_page_table_initialize(mlsize_t bytesize);
 #endif
 

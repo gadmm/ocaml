@@ -140,7 +140,7 @@ static int page_table_commit(int start, int end)
 // know that are not racing to set the same entry twice.
 // Idempotent (returns 0 even if some page table entries are already
 // set to [kind]).
-int caml_page_table_add(int kind, void * start, void * end)
+int caml_page_table_add(int kind, void *start, void *end)
 {
   int pstart = Pagetable_entry(start);
   int pend = Pagetable_entry((intnat)end - 1) + 1;
@@ -191,6 +191,8 @@ int caml_page_table_add(int kind, void * start, void * end)
 
 /* Static data table */
 
+/* The allocation size limit is not a problem on 32-bit since this is
+   used for lookup and not allocation. */
 static page_allocator static_area = PA_STATIC_INITIALIZER(Page_log);
 
 int caml_is_in_static_data(void *addr)
@@ -203,7 +205,7 @@ int caml_is_in_static_data(void *addr)
 
 #define Page_mask (~(Page_size - 1))
 
-static void static_area_insert(void * start, void * end)
+void caml_static_area_add(void *start, void *end)
 {
   uintnat pstart = (uintnat)start & Page_mask;
   uintnat pend = ((uintnat)end - 1) & Page_mask;
@@ -215,10 +217,10 @@ static void static_area_insert(void * start, void * end)
   }
 }
 
-int caml_page_table_add_static_data(void * start, void * end)
+int caml_page_table_add_static_data(void *start, void *end)
 {
   if (-1 == caml_page_table_add(Unmanaged, start, end))
     return -1;
-  static_area_insert(start, end);
+  caml_static_area_add(start, end);
   return 0;
 }

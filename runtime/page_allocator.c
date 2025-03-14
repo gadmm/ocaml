@@ -59,9 +59,10 @@ static void pa_remove_free(page_allocator *pa, char *block, asize_t size)
     CAMLassert(0);
 }
 
-// assumes (block, size) is not a member of the freelist and size < Size_max.
+// assumes (block, size) is not a member of the freelist and size <= max
 static void pa_add_free(page_allocator *pa, char *block, asize_t size)
 {
+  CAMLassert(size <= PA_size_max(pa));
   caml_skiplist_insert(&pa->free_per_address_sk, (uintnat)block, (uintnat)size);
   caml_skiplist_insert(&pa->free_per_size_sk, pa_size_key(pa, block, size),
                        (uintnat)block);
@@ -121,7 +122,12 @@ void caml_pa_merge(page_allocator *pa, char *block, asize_t size)
     pa_remove_free(pa, block_after, size_after);
     size += size_after;
   }
-  pa_add_free(pa, block, size);
+  while (size > 0) {
+    asize_t slice = (size > PA_size_max(pa)) ? PA_size_max(pa) : size;
+    pa_add_free(pa, block, size);
+    size -= slice;
+    block += slice;
+  }
 }
 
 int caml_pa_alloc(page_allocator *pa, asize_t request,
@@ -130,12 +136,14 @@ int caml_pa_alloc(page_allocator *pa, asize_t request,
   char *block;
   asize_t available;
   request = Round_up(request, PA_page_size(pa));
+  if (request > PA_size_max(pa)) return 0;
   if (pa_find_above_size(pa, request, &block, &available)) {
     char *new_block;
     pa_remove_free(pa, block, available);
     if (MMAP_GROWS_DOWN) {
-      /* Commit the end to avoid holes, later, in the committed VAS,
-         on platforms where mmap grows down. This is a heuristic. */
+      /* Commit the end rather than the start in order to avoid holes,
+         later on, inside the committed VAS, on platforms where we
+         know that mmap grows down. This is a heuristic. */
       new_block = block + available - request;
     } else {
       new_block = block;
@@ -143,7 +151,7 @@ int caml_pa_alloc(page_allocator *pa, asize_t request,
     }
     available -= request;
     pa_add_free(pa, block, available);
-    *size_out = request;
+    if (size_out != NULL) *size_out = request;
     *block_out = new_block;
     return 1;
   } else {

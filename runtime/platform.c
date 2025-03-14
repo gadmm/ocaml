@@ -36,7 +36,7 @@
 uintnat caml_real_page_size = Page_size;
 static bool caml_os_overcommit = false;
 
-/* The following function is from mimalloc.
+/* The following function unix_detect_overcommit is from mimalloc.
    Copyright (c) 2018-2023, Microsoft Research, Daan Leijen
    You can redistribute it and/or modify it under the terms of the MIT license.
 */
