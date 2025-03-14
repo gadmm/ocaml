@@ -414,9 +414,17 @@ CAMLexport CAMLweakdef void caml_modify (value *fp, value val)
     old = *fp;
     *fp = val;
     /* Check for condition 1. */
-    if (Is_block(val) &&
-        caml_classify_address(heap_table, (void *)val) & In_young) {
-      add_to_ref_table (Caml_state->ref_table, fp);
+    if (Is_block(val)) {
+      int val_class = caml_classify_address(heap_table, (void *)val);
+      if (val_class & In_young) {
+        add_to_ref_table (Caml_state->ref_table, fp);
+      }
+      if (CAMLunlikely(fp_class & Unmanaged)
+          && (val_class & (In_young | In_heap))) {
+        /* An attempt to create a pointer from out-of-heap to in-heap
+           through mutation. */
+        abort();
+      }
     }
     if (Is_block(old)) {
       int old_class = caml_classify_address(heap_table, (void *)old);
