@@ -83,11 +83,11 @@
 /* Use the following macros to test an address for the different classes
    it might belong to. */
 
-#define Is_young(val) \
-  (CAMLassert (Is_block (val)), \
-   (caml_classify_address((void*)a) & In_young))
+#define Is_young(val)                                                   \
+  (CAMLassert(Is_block (val)),                                          \
+   !!(caml_classify_address((void*)(val)) & In_young))
 
-#define Is_in_heap(a) (caml_classify_address((void*)a) & In_heap)
+#define Is_in_heap(a) (!!(caml_classify_address((void*)a) & In_heap))
 
 #ifdef NO_NAKED_POINTERS
 
@@ -97,7 +97,7 @@
 #else
 
 #define Is_in_heap_or_young(a)                              \
-  (caml_classify_address((void*)a) & (In_heap | In_young))
+  (!!(caml_classify_address((void*)a) & (In_heap | In_young)))
 
 #define Is_in_value_area(a) \
   (Is_in_heap_or_young(a) || caml_is_in_static_data((void *)(a)))

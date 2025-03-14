@@ -199,6 +199,8 @@ void caml_set_minor_heap_size(asize_t bsz)
   reset_table ((struct generic_table *) Caml_state->ref_table);
   reset_table ((struct generic_table *) Caml_state->ephe_ref_table);
   reset_table ((struct generic_table *) Caml_state->custom_table);
+  CAMLassert(Is_young((value)(Caml_state->young_alloc_start + 1)));
+  CAMLassert(Is_young((value)(Caml_state->young_alloc_end - 1)));
   return;
 oom:
   /* We did not touch the existing mapping */
