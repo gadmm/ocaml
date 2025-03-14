@@ -134,24 +134,25 @@ static void clear_table (struct generic_table *tbl)
     tbl->limit = tbl->threshold;
 }
 
-static int realloc_minor_heap(asize_t bsz)
+static bool realloc_minor_heap(asize_t bsz)
 {
   char *new_heap;
   asize_t new_reserved;
-  if (-1 == caml_mem_reserve(bsz, In_young, &new_heap, &new_reserved))
-    return -1;
-  if (-1 == caml_mem_commit(new_heap, bsz))
-    return -1;
+  if (!caml_mem_reserve(bsz, In_young, &new_heap, &new_reserved))
+    return false;
+  if (!caml_mem_commit(new_heap, bsz))
+    return false;
   if (Caml_state->young_alloc_start != NULL) {
     caml_mem_decommit((char *)Caml_state->young_alloc_start,
                       Caml_state->young_reserved);
-    // Keep the old mapping reserved. The space reserved for the minor
-    // heap cannot grow indefinitely.
+    // Keep the old mapping reserved to avoid reallocation for
+    // something else. The space reserved for the minor heap cannot
+    // grow indefinitely.
   }
-  Caml_state->young_alloc_start = (value *) new_heap;
-  Caml_state->young_alloc_end = (value *) (new_heap + bsz);
+  Caml_state->young_alloc_start = (value *)new_heap;
+  Caml_state->young_alloc_end = (value *)(new_heap + bsz);
   Caml_state->young_reserved = new_reserved;
-  return 0;
+  return true;
 }
 
 void caml_set_minor_heap_size(asize_t bsz)
@@ -175,12 +176,10 @@ void caml_set_minor_heap_size(asize_t bsz)
   CAMLassert (bsz % sizeof (value) == 0);
   if (Caml_state->young_reserved < bsz) {
     // Reallocate the minor heap
-    if (-1 == realloc_minor_heap(bsz))
-      goto oom;
+    if (!realloc_minor_heap(bsz)) goto oom;
   } else {
     // Grow/shrink in place
-    if (-1 == caml_mem_commit(heap, bsz))
-      goto oom;
+    if (!caml_mem_commit(heap, bsz)) goto oom;
     caml_mem_decommit(heap + bsz, Caml_state->young_reserved - bsz);
     Caml_state->young_alloc_end = (value *) (heap + bsz);
   }

@@ -443,7 +443,7 @@ void caml_compact_heap (intnat new_allocation_policy)
        recognized as free by the recompaction. */
     caml_make_free_blocks ((value *) chunk,
                            Wsize_bsize (Chunk_size (chunk)), 0, Caml_blue);
-    if (caml_page_table_add (In_heap, chunk, chunk + Chunk_size (chunk)) != 0){
+    if (!caml_page_table_add(In_heap, chunk, chunk + Chunk_size (chunk))){
       caml_free_for_heap (chunk);
       return;
     }

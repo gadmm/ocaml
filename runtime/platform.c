@@ -273,7 +273,7 @@ static void adjust_to_page(char **block, asize_t *size)
   *block = (char *)start_aligned;
 }
 
-static int mem_commit_os(char *block, asize_t size)
+static bool mem_commit_os(char *block, asize_t size)
 {
 #ifndef _WIN32
   /* - Commit:
@@ -306,7 +306,7 @@ static int mem_commit_os(char *block, asize_t size)
        called. */
     if (-1 == madvise_os(block, size, MADV_FREE_REUSE)) {
       caml_gc_message(0x1000, "out of memory (failed to reuse mapping)");
-      return -1;
+      return false;
     }
   }
   /* Linux */
@@ -315,7 +315,7 @@ static int mem_commit_os(char *block, asize_t size)
        overcommitting. */
     if (-1 == madvise_os(block, size, MADV_POPULATE_WRITE)) {
       caml_gc_message(0x1000, "out of memory (failed to populate mapping)");
-      return -1;
+      return false;
     }
   }
 #else // _WIN32
@@ -328,14 +328,14 @@ static int mem_commit_os(char *block, asize_t size)
     goto err;
   }
 #endif
-  return 0;
+  return true;
  err:
   caml_gc_message(0x1000,
                   "failed to commit mapping "
                   "(block=%p, size=%" ARCH_SIZET_PRINTF_FORMAT "u), "
                   "error=%s\n",
                   block, size, strerror(errno));
-  return -1;
+  return false;
 }
 
 static void mem_decommit_os(char * block, asize_t size)
@@ -448,7 +448,7 @@ char * caml_mem_reserve_os(asize_t size, asize_t align)
 }
 
 /* can be used to recommit (preserves already-committed mapping) */
-int caml_mem_commit_os(char *block, asize_t size)
+bool caml_mem_commit_os(char *block, asize_t size)
 {
   caml_gc_message(0x1000, "committing %" ARCH_SIZET_PRINTF_FORMAT "u bytes"
                           " at %p for heaps\n",

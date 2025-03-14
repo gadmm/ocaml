@@ -75,10 +75,10 @@ atomic_char *caml_heap_table = NULL;
 static_assert(Pagetable_log < 8 * sizeof(int) - 1, "invalid page sizes");
 static_assert(Huge_page_log <= Pagetable_entry_log, "invalid page sizes");
 
-int caml_page_table_initialize(mlsize_t bytesize)
+bool caml_page_table_initialize(mlsize_t bytesize)
 {
 #ifdef ARCH_SIXTYFOUR
-  int ret = 0;
+  bool success = 0;
   void *block = caml_mem_reserve_os(Pagetable_size, Page_size);
 #else
   /* On 32-bit, the table is smaller than a page */
@@ -89,28 +89,29 @@ int caml_page_table_initialize(mlsize_t bytesize)
   caml_heap_table = (atomic_char *)block + (Pagetable_size / 2);
 #ifdef ARCH_SIXTYFOUR
   /* Commit initial portion */
-  ret = caml_mem_commit_os((char *)caml_heap_table - (Pagetable_initial_size/2),
-                           Pagetable_initial_size);
-  CAMLassert(ret != -1 || errno == ENOMEM);
-  if (ret == -1) goto err;
+  success =
+    caml_mem_commit_os((char *)caml_heap_table - (Pagetable_initial_size/2),
+                       Pagetable_initial_size);
+  CAMLassert(success || errno == ENOMEM);
+  if (!success) goto err;
 #endif
-  return 0;
+  return success;
  err:
   caml_gc_message(0x1000,
                   "page table allocation failed "
                   "(reserving %u bytes, committing %u bytes), "
                   "strerror()=%s\n",
                   Pagetable_size, Pagetable_initial_size, strerror(errno));
-  return -1;
+  return success;
 }
 
 /* This is called infrequently, and for a small portion of
    caml_heap_table, thanks to the hints given to mmap inside
    [caml_alloc_for_heap] which tends to reserve heap inside
    already-committed pages of caml_heap_table. */
-static int page_table_commit(int start, int end)
+static bool page_table_commit(int start, int end)
 {
-  int ret = 0;
+  bool success = 0;
 #ifdef ARCH_SIXTYFOUR
   int page_start = Round_down(start, Real_page_size);
   int page_end = Round_up(end, Real_page_size);
@@ -118,36 +119,36 @@ static int page_table_commit(int start, int end)
   CAMLassert(start < end);
   if (page_start >= -(Pagetable_initial_size / 2)
       && page_end <= Pagetable_initial_size / 2) {
-    /* Part of the initial portion already committed, avoid a
+    /* Part of the initial portion which is already committed, avoid a
        syscall. */
-    return 0;
+    return true;
   }
   CAMLassert(page_start >= -(Pagetable_size / 2));
   CAMLassert(page_end <= Pagetable_size / 2);
-  ret = caml_mem_commit_os((char *)&caml_heap_table[page_start], size);
-  CAMLassert(ret != -1 || errno == ENOMEM);
-  if (ret == -1) {
+  success = caml_mem_commit_os((char *)&caml_heap_table[page_start], size);
+  CAMLassert(success || errno == ENOMEM);
+  if (!success) {
     caml_gc_message(0x1000,
                     "failed to commit page table "
                     "(start=%d, end=%d), strerror()=%s\n",
                     start, end, strerror(errno));
   }
 #endif
-  return ret;
+  return success;
 }
 
 // Assumes that the caller owns the mapping from start to end, so we
 // know that are not racing to set the same entry twice.
-// Idempotent (returns 0 even if some page table entries are already
-// set to [kind]).
-int caml_page_table_add(int kind, void *start, void *end)
+// Idempotent (returns true even if some page table entries are already
+// set to [kind]). Returns false on error.
+bool caml_page_table_add(int kind, void *start, void *end)
 {
   int pstart = Pagetable_entry(start);
   int pend = Pagetable_entry((intnat)end - 1) + 1;
   int p;
-  int ret = 0;
-  if (end < start) return -1;
-  if (-1 == page_table_commit(pstart, pend)) return -1;
+  bool success = true;
+  if (end < start) return false;
+  if (!page_table_commit(pstart, pend)) return false;
   for (p = pstart; p < pend; p++) {
     char e = 0;
 #ifdef HAS_ATOMICS
@@ -182,11 +183,11 @@ int caml_page_table_add(int kind, void *start, void *end)
                         "(start=%p, end=%p, pstart=%d, pend=%d, p=%d, "
                         "old_kind=%d, new_kind=%d)\n",
                         start, end, pstart, pend, p, e, kind);
-        ret = -1;
+        success = false;
       }
     }
   }
-  return ret;
+  return success;
 }
 
 /* Static data table */
@@ -195,7 +196,7 @@ int caml_page_table_add(int kind, void *start, void *end)
    used for lookup and not allocation. */
 static page_allocator static_area = PA_STATIC_INITIALIZER(Page_log);
 
-int caml_is_in_static_data(void *addr)
+bool caml_is_in_static_data(void *addr)
 {
   char *block;
   asize_t size;
@@ -217,10 +218,10 @@ void caml_static_area_add(void *start, void *end)
   }
 }
 
-int caml_page_table_add_static_data(void *start, void *end)
+bool caml_page_table_add_static_data(void *start, void *end)
 {
-  if (-1 == caml_page_table_add(Unmanaged, start, end))
-    return -1;
+  if (!caml_page_table_add(Unmanaged, start, end))
+    return false;
   caml_static_area_add(start, end);
-  return 0;
+  return true;
 }

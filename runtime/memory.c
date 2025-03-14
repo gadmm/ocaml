@@ -52,7 +52,7 @@ char *caml_alloc_for_heap (asize_t request)
   char *mem, *block;
   asize_t committed;
   request += sizeof(heap_chunk_head);
-  if (-1 == caml_heap_commit(request, &block, &committed))
+  if (!caml_heap_commit(request, &block, &committed))
     return NULL;
   mem = block + sizeof(heap_chunk_head);
   Chunk_size(mem) = committed - sizeof(heap_chunk_head);
@@ -79,11 +79,11 @@ void caml_free_for_heap (char *mem)
    some blocks are blue, they must be added to the free list by the
    caller.  All other blocks must have the color [caml_allocation_color(m)].
    The caller must update [caml_allocated_words] if applicable.
-   Return value: 0 if no error; -1 in case of error.
+   Return false in case of error.
 
    See also: caml_compact_heap, which duplicates most of this function.
 */
-int caml_add_to_heap (char *m)
+bool caml_add_to_heap (char *m)
 {
 #ifdef DEBUG
   /* Should check the contents of the block. */
@@ -94,8 +94,8 @@ int caml_add_to_heap (char *m)
      (Bsize_wsize (Caml_state->stat_heap_wsz) + Chunk_size (m)) / 1024);
 
   /* Register block in page table */
-  if (caml_page_table_add(In_heap, m, m + Chunk_size(m)) != 0)
-    return -1;
+  if (!caml_page_table_add(In_heap, m, m + Chunk_size(m)))
+    return false;
 
   /* Chain this heap chunk. */
   {
@@ -116,7 +116,7 @@ int caml_add_to_heap (char *m)
   if (Caml_state->stat_heap_wsz > Caml_state->stat_top_heap_wsz){
     Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
   }
-  return 0;
+  return true;
 }
 
 /* Allocate more memory from malloc for the heap.
@@ -170,7 +170,7 @@ static value *expand_heap (mlsize_t request)
     }
   }
   CAMLassert (Wosize_hp (mem) >= request);
-  if (caml_add_to_heap ((char *) mem) != 0){
+  if (!caml_add_to_heap((char *) mem)) {
     caml_free_for_heap ((char *) mem);
     return NULL;
   }

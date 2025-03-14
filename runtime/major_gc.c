@@ -1238,9 +1238,8 @@ void caml_init_major_heap (asize_t heap_size)
   Caml_state->stat_heap_chunks = 1;
   Caml_state->stat_top_heap_wsz = Caml_state->stat_heap_wsz;
 
-  if (caml_page_table_add(In_heap, caml_heap_start,
-                          caml_heap_start + heap_size)
-      != 0) {
+  if (!caml_page_table_add(In_heap, caml_heap_start,
+                           caml_heap_start + heap_size)) {
     caml_fatal_error ("cannot allocate initial page table");
   }
 

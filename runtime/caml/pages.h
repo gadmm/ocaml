@@ -27,6 +27,8 @@
 #include "config.h"
 #include "mlvalues.h"
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,15 +36,15 @@ extern "C" {
 extern uintnat caml_use_huge_pages;
 
 /* reserve at least [request] contiguous memory, rounded up to the
-   Pagetable_entry_size and record it with the page table. Returns -1
-   on error (TODO: CHANGE). */
-int caml_mem_reserve(asize_t request, int kind,
-                     char **out_block, asize_t *out_reserved);
+   Pagetable_entry_size and record it with the page table. Returns
+   false on error. */
+bool caml_mem_reserve(asize_t request, int kind,
+                      char **out_block, asize_t *out_reserved);
 
 /* [block] and [request] must be aligned to the real page size. In
    case of error the whole range is now invalid. It recognizes blocks
-   and sizes that are aligned to huge pages. Returns -1 on error. */
-int caml_mem_commit(char *block, asize_t request);
+   and sizes that are aligned to huge pages. Returns false on error. */
+bool caml_mem_commit(char *block, asize_t request);
 
 /* [block] and [size] must be aligned to Real_page_size. Whether one
    can decommit accross several distinct reservations (output of
@@ -50,9 +52,9 @@ int caml_mem_commit(char *block, asize_t request);
    platform.h. */
 void caml_mem_decommit(char * block, asize_t size);
 
-/* Allocation and deallocation for the major heap. Returns -1 on
+/* Allocation and deallocation for the major heap. Returns false on
    error. */
-int caml_heap_commit(asize_t request, char **out_block, asize_t *out_size);
+bool caml_heap_commit(asize_t request, char **out_block, asize_t *out_size);
 void caml_heap_decommit(char * block, asize_t size);
 
 /* Allocate a memory block for static data outside of the GC heap.
