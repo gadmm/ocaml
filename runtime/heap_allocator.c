@@ -123,3 +123,40 @@ void caml_heap_decommit(char * block, asize_t size)
   caml_mem_decommit(block, size);
   caml_pa_merge(huge ? &huge_allocator : &heap_allocator, block, size);
 }
+
+/* Allocator for out of heap static data. */
+
+/* Very small granularity is not a problem: if we cannot allocate from
+   the [free_static] page allocator then we directly allocate from the
+   system, and nothing is ever deallocated. We only want the max size
+   smaller than Page_size, so Static_block_granularity >= 6. */
+#define Static_block_granularity 8 /* 256 bytes */
+
+/* TODO: free all static data on runtime shutdown? */
+
+static page_allocator free_static =
+  PA_STATIC_INITIALIZER(Static_block_granularity);
+
+char *caml_static_data_alloc(mlsize_t wosize)
+{
+  char *block;
+  asize_t free;
+  asize_t size = wosize * sizeof(value);
+  if (!caml_pa_alloc(&free_static, size, &block, NULL)) {
+    /* Request too large */
+    asize_t reserved = 0;
+    char *superblock = NULL;
+    if (!caml_mem_reserve(size, Unmanaged, &superblock, &reserved))
+      return NULL;
+    caml_static_area_add(superblock, superblock + reserved);
+    if (!caml_mem_commit(superblock, reserved)) return NULL;
+    block = superblock;
+    /* Keep the rest for later allocations */
+    free = Round_down(reserved - size, (uintnat)1 << Static_block_granularity);
+    if (free > 0) {
+      superblock = superblock + reserved - free;
+      caml_pa_merge(&free_static, superblock, free);
+    }
+  }
+  return (void *) block;
+}

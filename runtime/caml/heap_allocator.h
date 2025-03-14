@@ -56,6 +56,10 @@ void caml_mem_decommit(char * block, asize_t size);
 bool caml_heap_commit(asize_t request, char **out_block, asize_t *out_size);
 void caml_heap_decommit(char * block, asize_t size);
 
+/* Allocate a memory block for static data outside of the GC heap.
+   Never deallocated. */
+char *caml_static_data_alloc(mlsize_t wosize);
+
 #ifdef __cplusplus
 }
 #endif
