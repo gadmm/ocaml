@@ -413,6 +413,32 @@ void* caml_mem_map(uintnat size, int reserve_only)
   return mem;
 }
 
+void* caml_mem_map_aligned(uintnat size, uintnat alignment, int reserve_only)
+{
+  uintnat alloc_sz = caml_mem_round_up_pages(size + alignment);
+  void* mem;
+  uintnat base, aligned_start, aligned_end;
+
+  CAMLassert(Is_power_of_2(alignment));
+  alignment = caml_mem_round_up_pages(alignment);
+
+  CAMLassert(alloc_sz > size);
+  mem = mmap(0, alloc_sz, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mem == MAP_FAILED) {
+    return 0;
+  }
+
+  /* trim to an aligned region */
+  base = (uintnat)mem;
+  aligned_start = Round_up(base, alignment);
+  aligned_end = aligned_start + caml_mem_round_up_pages(size);
+  caml_mem_unmap((void*)base, aligned_start - base);
+  caml_mem_unmap((void*)aligned_end, (base + alloc_sz) - aligned_end);
+  if (!reserve_only) caml_plat_mem_commit((void*)aligned_start,
+                                          aligned_end - aligned_start);
+  return (void*)aligned_start;
+}
+
 void* caml_mem_commit(void* mem, uintnat size)
 {
   CAMLassert(Is_page_aligned(size));

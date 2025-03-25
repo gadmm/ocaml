@@ -432,6 +432,7 @@ uintnat caml_mem_round_up_pages(uintnat size);
    must match the size given to caml_mem_map/caml_mem_commit for mem.
 */
 void* caml_mem_map(uintnat size, int reserve_only);
+void* caml_mem_map_aligned(uintnat size, uintnat alignment, int reserve_only);
 void* caml_mem_commit(void* mem, uintnat size);
 void caml_mem_decommit(void* mem, uintnat size);
 void caml_mem_unmap(void* mem, uintnat size);

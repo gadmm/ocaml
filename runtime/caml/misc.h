@@ -649,6 +649,11 @@ CAMLextern int caml_snwprintf(wchar_t * buf,
  */
 typedef void * backtrace_slot;
 
+#define Huge_page_log 21 // 2MB
+#define Huge_page_size ((uintnat)1 << Huge_page_log)
+#define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
+#define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
+
 #ifdef __cplusplus
 }
 #endif

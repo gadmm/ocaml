@@ -71,6 +71,7 @@ static_assert(sizeof(large_alloc) % sizeof(value) == 0, "");
 static struct {
   caml_plat_mutex lock;
   pool* free;
+  uintnat last_alloc_size;
 
   /* these only contain swept memory of terminated domains*/
   struct heap_stats stats;
@@ -80,6 +81,7 @@ static struct {
 } pool_freelist = {
   CAML_PLAT_MUTEX_INITIALIZER,
   NULL,
+  10,
   { 0, },
   { NULL, },
   { NULL, },
@@ -177,28 +179,35 @@ void caml_teardown_shared_heap(struct caml_heap_state* heap) {
               released, released_large);
 }
 
+/* [pool_freelist.lock] must be held */
+static void replenish_freelist(void)
+{
+  size_t pool_size = Bsize_wsize(POOL_WSIZE);
+  CAMLassert(Round_up(Huge_page_size, pool_size) == Huge_page_size);
+  /* grow exponentially, factor 1.2 (similar to OCaml) */
+  pool_freelist.last_alloc_size *= 12;
+  pool_freelist.last_alloc_size /= 10;
+  /* Allocate multiples of Huge_page_size */
+  size_t size = Round_up(pool_freelist.last_alloc_size * pool_size,
+                         Huge_page_size);
+  char *mem = caml_mem_map_aligned(size, Huge_page_size, 0);
+  if (mem == NULL) caml_fatal_error("replenish_freelist");
+  for (char *i = mem; i < mem + size; i += pool_size) {
+    pool *r = (pool *)i;
+    r->next = pool_freelist.free;
+    r->owner = NULL;
+    pool_freelist.free = r;
+  }
+}
 
 /* Allocating and deallocating pools from the global freelist. */
-
 static pool* pool_acquire(struct caml_heap_state* local) {
   pool* r;
 
   caml_plat_lock_blocking(&pool_freelist.lock);
-  if (!pool_freelist.free) {
-    void* mem = caml_mem_map(Bsize_wsize(POOL_WSIZE), 0);
-
-    if (mem) {
-      CAMLassert(pool_freelist.free == NULL);
-
-      r = (pool*)mem;
-      r->next = pool_freelist.free;
-      r->owner = NULL;
-      pool_freelist.free = r;
-    }
-  }
+  if (pool_freelist.free == NULL) replenish_freelist();
   r = pool_freelist.free;
-  if (r)
-    pool_freelist.free = r->next;
+  pool_freelist.free = r->next;
   caml_plat_unlock(&pool_freelist.lock);
 
   if (r) CAMLassert (r->owner == NULL);
@@ -220,15 +229,11 @@ static void pool_release(struct caml_heap_state* local,
   caml_plat_unlock(&pool_freelist.lock);
 }
 
-/* free the memory of [pool], giving it back to the OS */
 static void pool_free(struct caml_heap_state* local,
                          pool* pool,
                          sizeclass sz)
 {
-    CAMLassert(pool->sz == sz);
-    local->stats.pool_words -= POOL_WSIZE;
-    local->stats.pool_frag_words -= POOL_HEADER_WSIZE + wastage_sizeclass[sz];
-    caml_mem_unmap(pool, Bsize_wsize(POOL_WSIZE));
+  pool_release(local, pool, sz);
 }
 
 static void calc_pool_stats(pool* a, sizeclass sz, struct heap_stats* s)
@@ -1277,25 +1282,7 @@ void caml_compact_heap(caml_domain_state* domain_state,
   CAML_EV_END(EV_COMPACT_RELEASE);
   caml_global_barrier(participating_count);
 
-  /* Fourth phase: one domain also needs to release the free list */
   if( participants[0] == Caml_state ) {
-    pool* cur_pool;
-    pool* next_pool;
-
-    caml_plat_lock_blocking(&pool_freelist.lock);
-    cur_pool = pool_freelist.free;
-
-    while( cur_pool ) {
-      next_pool = cur_pool->next;
-      /* No stats to update so just unmap */
-      caml_mem_unmap(cur_pool, Bsize_wsize(POOL_WSIZE));
-      cur_pool = next_pool;
-    }
-
-    pool_freelist.free = NULL;
-
-    caml_plat_unlock(&pool_freelist.lock);
-
     /* We are done, increment our compaction count */
     atomic_fetch_add(&caml_compactions_count, 1);
   }

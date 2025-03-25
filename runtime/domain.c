@@ -476,12 +476,6 @@ static void free_minor_heap(void) {
                    (uintnat) domain_state->young_start);
 }
 
-#define Huge_page_log 21 // 2MB
-#define Huge_page_size ((uintnat)1 << Huge_page_log)
-
-#define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
-#define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
-
 static int allocate_minor_heap(asize_t wsize) {
   caml_domain_state* domain_state = Caml_state;
 
@@ -821,7 +815,8 @@ static void reserve_minor_heaps_from_stw_single(void) {
   minor_heap_reservation_bsize = minor_heap_max_bsz * caml_params->max_domains;
 
   /* reserve memory space for minor heaps */
-  heaps_base = caml_mem_map(minor_heap_reservation_bsize, 1 /* reserve_only */);
+  heaps_base = caml_mem_map_aligned(minor_heap_reservation_bsize,
+                                    Huge_page_size, 1 /* reserve_only */);
   if (heaps_base == NULL)
     caml_fatal_error("Not enough heap memory to reserve minor heaps");
 
@@ -840,9 +835,11 @@ static void reserve_minor_heaps_from_stw_single(void) {
 
     dom->minor_heap_area_start = domain_minor_heap_area;
     dom->minor_heap_area_end =
-         domain_minor_heap_area + minor_heap_max_bsz;
+      Round_up(caml_minor_heaps_start + minor_heap_max_bsz * (uintnat)(i+1),
+               Huge_page_size);
 
-    CAMLassert(dom->minor_heap_area_end <= caml_minor_heaps_end);
+    if (dom->minor_heap_area_end > caml_minor_heaps_end)
+      dom->minor_heap_area_end = caml_minor_heaps_end;
   }
 }
 
