@@ -476,6 +476,12 @@ static void free_minor_heap(void) {
                    (uintnat) domain_state->young_start);
 }
 
+#define Huge_page_log 21 // 2MB
+#define Huge_page_size ((uintnat)1 << Huge_page_log)
+
+#define Round_down(n, mod) (((n) >= 0 ? (n) : (n) - (mod) + 1) / (mod) * (mod))
+#define Round_up(n, mod) (Round_down((n) + (mod) - 1, (mod)))
+
 static int allocate_minor_heap(asize_t wsize) {
   caml_domain_state* domain_state = Caml_state;
 
@@ -489,7 +495,8 @@ static int allocate_minor_heap(asize_t wsize) {
                ARCH_SIZET_PRINTF_FORMAT "uk words", wsize / 1024);
 
   if (!caml_mem_commit(
-          (void*)domain_self->minor_heap_area_start, Bsize_wsize(wsize))) {
+          (void*)domain_self->minor_heap_area_start,
+          Round_up(Bsize_wsize(wsize), Huge_page_size))) {
     return -1;
   }
 
@@ -827,8 +834,9 @@ static void reserve_minor_heaps_from_stw_single(void) {
   for (int i = 0; i < caml_params->max_domains; i++) {
     struct dom_internal* dom = &all_domains[i];
 
-    uintnat domain_minor_heap_area = caml_minor_heaps_start +
-      minor_heap_max_bsz * (uintnat)i;
+    uintnat domain_minor_heap_area =
+      Round_up(caml_minor_heaps_start + minor_heap_max_bsz * (uintnat)i,
+               Huge_page_size);
 
     dom->minor_heap_area_start = domain_minor_heap_area;
     dom->minor_heap_area_end =
