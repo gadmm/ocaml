@@ -518,7 +518,7 @@ CAMLprim value caml_gc_set(value v)
   if (newminwsz != Caml_state->minor_heap_wsz){
     caml_gc_message (0x20, "New minor heap size: %"
                      ARCH_SIZET_PRINTF_FORMAT "uk words\n", newminwsz / 1024);
-    caml_set_minor_heap_size (Bsize_wsize (newminwsz));
+    caml_set_minor_heap_size (Bsize_wsize (newminwsz));//FIXME: raises
   }
   CAML_EV_END(EV_EXPLICIT_GC_SET);
 
@@ -567,7 +567,7 @@ CAMLprim value caml_gc_major(value v)
   caml_empty_minor_heap ();
   caml_finish_major_cycle ();
   test_and_compact ();
-  // call finalisers
+  // do a minor GC and a major slice (?) then call finalisers
   exn = caml_process_pending_actions_exn();
   CAML_EV_END(EV_EXPLICIT_GC_MAJOR);
   caml_raise_if_exception(exn);
@@ -583,14 +583,14 @@ CAMLprim value caml_gc_full_major(value v)
   caml_gc_message (0x1, "Full major GC cycle (requested by user)\n");
   caml_empty_minor_heap ();
   caml_finish_major_cycle ();
-  // call finalisers
+  // do a minor GC and a major slice (?) then call finalisers
   exn = caml_process_pending_actions_exn();
   if (Is_exception_result(exn)) goto cleanup;
   caml_empty_minor_heap ();
   caml_finish_major_cycle ();
   ++ Caml_state->stat_forced_major_collections;
   test_and_compact ();
-  // call finalisers
+  // do a minor GC and a major slice (?) then call finalisers
   exn = caml_process_pending_actions_exn();
 
 cleanup:
